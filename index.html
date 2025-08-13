@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PACMUSH ODYSSEY — MushRush Maze (Solo & 2 Joueurs)</title>
+<style>
+  :root { --bg:#0b0a0e; --card:#16131b; --pill:#1b141e; --line:#ffffff22; --shadow:#00000055; --text:#fff7ea; }
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial}
+  #wrap{display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px}
+  #hud{display:flex;gap:12px;align-items:center;user-select:none;font-weight:700;letter-spacing:.3px;flex-wrap:wrap;justify-content:center}
+  .pill{padding:6px 10px;border-radius:999px;background:var(--pill);border:1px solid var(--line);box-shadow:0 3px 10px var(--shadow)}
+  #legend{opacity:.9;font-size:14px}
+  #game{display:block;width:1100px;max-width:95vw;height:auto;background:#0f0c14;border-radius:18px;border:2px solid #00000055;box-shadow:0 22px 70px #000000aa}
+  .ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999}
+  .card{max-width:1100px;width:92vw;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 80px #0009;padding:18px;max-height:88vh;overflow:auto}
+  .title{font-weight:800;font-size:28px}
+  .sub{opacity:.9}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-top:14px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .badge{background:#ffffff10;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:12px}
+  .btn{background:#0e0b13;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer;color:var(--text)}
+  .btn[disabled]{opacity:.6;cursor:not-allowed}
+  .sectionTitle{margin-top:14px;font-weight:800}
+  .choice.disabled{opacity:.5;filter:grayscale(60%);pointer-events:none}
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="hud">
+      <div class="pill">Mode : <span id="mode">Solo</span></div>
+      <div class="pill">Niveau : <span id="lvl">1</span></div>
+      <div class="pill">J1 — Score: <span id="score1">0</span> · Vies: <span id="lives1">3</span> · Pouvoir: <span id="power1">—</span></div>
+      <div class="pill" id="p2hud" style="display:none">J2 — Score: <span id="score2">0</span> · Vies: <span id="lives2">3</span> · Pouvoir: <span id="power2">—</span></div>
+      <div class="pill">Difficulté : <span id="diff">Guerre des Spores</span></div>
+      <div id="legend" class="pill">J1: Flèches + Entrée · J2: ZQSD + F · P: pause/CR · O: menu</div>
+    </div>
+    <canvas id="game" width="1100" height="880" aria-label="PACMUSH ODYSSEY"></canvas>
+  </div>
+
+<script>
+/* =================== CODE COMPLET =================== */
+/* ============ Réfs UI ============ */
+const CANVAS = document.getElementById('game');
+const CTX = CANVAS.getContext('2d');
+const W = CANVAS.width, H = CANVAS.height;
+const UI = {
+  lvl:document.getElementById('lvl'),
+  mode:document.getElementById('mode'),
+  diff:document.getElementById('diff'),
+  score1:document.getElementById('score1'),
+  lives1:document.getElementById('lives1'),
+  power1:document.getElementById('power1'),
+  score2:document.getElementById('score2'),
+  lives2:document.getElementById('lives2'),
+  power2:document.getElementById('power2'),
+  p2hud:document.getElementById('p2hud'),
+  overlay:null, choices1:null, choices2:null, startBtn:null, modeSel:null
+};
+
+/* ============ Constantes ============ */
+const TILE=28;
+const COLS=Math.max(5,(W/TILE)|0);
+const ROWS=Math.max(5,(H/TILE)|0);
+
+/* Difficultés (texte mis à jour : “facile”) */
+const DIFFICULTIES=[
+  {id:'easy', name:'Cueillette du dimanche', label:'Cueillette du dimanche — facile', factor:0.25},
+  {id:'medium', name:'Chiens Truffiers', label:'Chiens Truffiers — moyen', factor:0.5},
+  {id:'hard', name:'Guerre des Spores', label:'Guerre des Spores — difficile', factor:1}
+];
+let SelectedDifficulty=DIFFICULTIES[2];
+
+const MATCH_LEVELS_SOLO=12;
+const MATCH_LEVELS_DUO=4;
+
+/* ============ Assets (sprites PNG fournis) ============ */
+const SPRITES = {
+  trumpet: loadImg('champignon_1.png'),
+  morel:   loadImg('champignon_2.png'),
+  phallo:  loadImg('champignon_3.png'),
+  cep:     loadImg('champignon_4.png'),
+  musc:    loadImg('champignon_5_bordered.png'),
+  giro:    loadImg('champignon_6_bordered.png'),
+};
+function loadImg(src){
+  const i=new Image(); i.src=src; i.decoding='async'; i.loading='eager'; return i;
+}
+function drawImgCentered(img, x, y, s){
+  if(!img || !img.complete) return;
+  const w = s, h = s;
+  CTX.drawImage(img, x - w/2, y - h/2, w, h);
+}
+
+/* ============ Entrées clavier ============ */
+const Keys=Object.create(null);
+addEventListener('keydown', (e)=>{
+  const k=e.key.toLowerCase();
+  Keys[k]=true;
+  if(['arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
+
+  // Activation pouvoirs  — J1: Entrée, J2: F
+  if(e.key === 'Enter') triggerPower(1);
+  if(k==='f') triggerPower(2);
+
+  // pause / compte à rebours (début de niveau conservé)
+  if(k==='p'){
+    if(!Game.started) return;
+    if(Game.countdown>0) return;
+    if(Game.paused) startCountdown(180); else Game.paused=true;
+  }
+
+  if(k==='o'){ openOverlay(); }
+});
+addEventListener('keyup', (e)=>{ Keys[e.key.toLowerCase()]=false; });
+
+function triggerPower(pid){
+  if(!Game.started){ startGame(); return; }
+  if(Game.countdown>0) return;
+  const pl = pid===1?Game.p1:Game.p2;
+  if(!pl) return;
+  if(pl.powerTimer<=0){
+    pl.species.use(pl);
+    if(pl.nextPowerExtend && pl.nextPowerExtend>0){ pl.powerTimer+=pl.nextPowerExtend; pl.nextPowerExtend=0; }
+    (pid===1?UI.power1:UI.power2).textContent=pl.species.power; sfxPower();
+  }
+}
+
+/* ============ Utils ============ */
+const now=()=>performance.now();
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const distance=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+const makeLayerCanvas=(w,h)=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
+
+/* ============ Audio ============ */
+let ACTX=null, MASTER=null, STARTED=false;
+function ensureAudio(){ if(STARTED) return; STARTED=true; ACTX=new (window.AudioContext||window.webkitAudioContext)(); MASTER=ACTX.createGain(); MASTER.gain.value=0.18; MASTER.connect(ACTX.destination); startMusic(); }
+function tone(time,freq,dur,type='sine',vol=0.2){ if(!ACTX) return; const o=ACTX.createOscillator(), g=ACTX.createGain(); o.type=type; o.frequency.setValueAtTime(freq,time); g.gain.value=0; g.gain.linearRampToValueAtTime(vol,time+0.01); g.gain.exponentialRampToValueAtTime(0.0001,time+dur); o.connect(g); g.connect(MASTER); o.start(time); o.stop(time+dur); }
+function sfxEat(){ if(!ACTX) return; const t=ACTX.currentTime; tone(t,740,.05,'triangle',.2); }
+function sfxPower(){ if(!ACTX) return; const t=ACTX.currentTime; tone(t,520,.1,'sawtooth',.22); tone(t+.1,880,.1,'square',.18); }
+function sfxHit(){ if(!ACTX) return; const t=ACTX.currentTime; tone(t,160,.08,'sawtooth',.3); }
+function sfxWin(){ if(!ACTX) return; const t=ACTX.currentTime; [660,880,990,1320].forEach((f,i)=>tone(t+i*.1,f,.1,'triangle',.2)); }
+function sfxLife(){ if(!ACTX) return; const t=ACTX.currentTime; [660,990,1320].forEach((f,i)=>tone(t+i*.08,f,.08,'sine',.22)); }
+function startMusic(){ if(!ACTX) return; const bpm=128, beat=60/bpm; const len=8*beat; (function loop(){ const t=ACTX.currentTime+0.05; const seq=[660,660,495,660,825,660,495,440]; const bass=[110,110,82,110,147,110,82,73]; for(let i=0;i<8;i++){ const nt=t+i*beat; tone(nt,seq[i],.18,'triangle',.07); tone(nt,bass[i],.25,'sine',.05);} setTimeout(loop,len*1000);}()) }
+CANVAS.addEventListener('click', ensureAudio);
+
+/* ============ Dessin entités avec sprites PNG ============ */
+function drawTrumpet(ctx,cx,cy,size,icon,ghost){
+  CTX.save();
+  if(ghost){ CTX.globalAlpha = 0.8; }
+  drawImgCentered(SPRITES.trumpet, cx, cy, size*1.15);
+  CTX.restore();
+}
+function drawAmanita(ctx,cx,cy,size){ drawImgCentered(SPRITES.musc, cx, cy, size*1.15); }
+function drawChanterelle(ctx,cx,cy,size){ drawImgCentered(SPRITES.giro, cx, cy, size*1.15); }
+function drawCep(ctx,cx,cy,size){ drawImgCentered(SPRITES.cep, cx, cy, size*1.15); }
+function drawMorel(ctx,cx,cy,size){ drawImgCentered(SPRITES.morel, cx, cy, size*1.15); }
+function drawPhalloides(ctx,cx,cy,size){ drawImgCentered(SPRITES.phallo, cx, cy, size*1.15); }
+
+/* ============ Parasites (ennemis) ============ */
+function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind){
+  kind=kind||0; ctx.save(); ctx.translate(cx,cy); const r=size*0.35;
+  if(isServant){
+    ctx.shadowColor='rgba(64,224,208,0.8)'; ctx.shadowBlur=10;
+    const grad=ctx.createRadialGradient(0,0,r*0.3,0,0,r*1.1);
+    grad.addColorStop(0,'#DFFFF8'); grad.addColorStop(0.5,'#40E0D0'); grad.addColorStop(1,'#1A8C86');
+    ctx.fillStyle=grad; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.stroke();
+    ctx.shadowBlur=0; ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.fillRect(-r*0.8,-r*0.1,r*1.6,r*0.2);
+  } else if(isBlind){
+    ctx.fillStyle='#8b8b8b'; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000'; ctx.fillRect(-r*1.0,-r*0.18, r*2.0, r*0.36);
+    ctx.fillStyle='#222'; ctx.fillRect(-r*0.8,-r*0.1, r*1.6, r*0.2);
+  } else {
+    const col=['#9f3b3b','#3b6f9f','#9f8a3b','#7f3b9f'][kind%4];
+    ctx.fillStyle=col; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#111'; ctx.fillRect(-r*0.8,-r*0.1,r*1.6,r*0.2);
+  }
+  ctx.restore();
+}
+
+/* ============ Espèces & pouvoirs (descriptions simplifiées) ============ */
+const Species=[
+  { id:'cornucopioides', name:"Trompette de la mort", power:"Voile total (10s)", desc:"Invisible, parasites aveugles & lents, immunisée aux pièges 10s.", color:'#3d3630',
+    draw:(c,x,y,s,icon,ghost)=>drawTrumpet(c,x,y,s,icon,ghost),
+    use:(me)=>{ me.powerTimer=600; me.invisible=true; me.trumpetTrapImmune=true; Game.parasites.forEach(p=>{ p.blind=Math.max(p.blind,600); }); }
+  },
+  { id:'muscaria', name:'Amanite tue-mouches', power:'Piège mycotique', desc:"Pose un piège qui téléporte les parasites.", color:'#c81d1d',
+    draw:drawAmanita,
+    use:(me)=>{ const tx=Math.floor(me.x), ty=Math.floor(me.y); if(me.pid===1) Game.muscariaTrap1={x:tx,y:ty,active:true}; else Game.muscariaTrap2={x:tx,y:ty,active:true}; me.powerTimer=120; }
+  },
+  { id:'cibarius', name:'Girolle', power:'Serviteur (15s)', desc:'Convertit 1 parasite en allié collecteur.', color:'#e6a100',
+    draw:drawChanterelle,
+    use:(me)=>{ me.powerTimer=300; me.hunterWindow=300; UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?'; }
+  },
+  { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse les ennemis.', color:'#7a4f2a',
+    draw:drawCep,
+    use:(me)=>{ me.powerTimer=360; me.shield=true; }
+  },
+  { id:'morchella', name:'Morille', power:'Essaim de spores', desc:'Chaos global, parasites désorientés.', color:'#6a4f2f',
+    draw:drawMorel,
+    use:(me)=>{ me.powerTimer=300; spawnSporeCloud(me.x,me.y); Game.parasites.forEach(p=>{ p.scared=300; p.chaos=true; p.chaosMode=null; p.chaosTick=0; p.chaosTarget=null; p.seedOnce=false; p.seedCd=0; p.chaosAte=false; }); }
+  },
+  { id:'phalloides', name:'Amanite phalloïde', power:'Phase mycélienne', desc:'Traverse les murs fins brièvement.', color:'#7a8b4b',
+    draw:drawPhalloides,
+    use:(me)=>{ me.powerTimer=240; me.phase=true; }
+  },
+];
+let Selected1=Species[0], Selected2=Species[1];
+
+/* =================== OVERLAY / MENU =================== */
+function buildChoiceCard(sp, forPid){
+  const otherSel = (forPid===1)? Selected2 : Selected1;
+  const disabled = (Game && Game.mode==='duo' && otherSel && otherSel.id===sp.id);
+
+  const div=document.createElement('div');
+  div.className='choice'+(disabled?' disabled':'');
+  div.style.cssText='background:#0e0b13;border:1px solid #ffffff1f;border-radius:12px;padding:12px;cursor:pointer;display:flex;gap:10px;align-items:center;';
+  const icon=document.createElement('canvas'); icon.width=56; icon.height=56; const ict=icon.getContext('2d'); sp.draw(ict,28,42,50,true,false);
+
+  const right=document.createElement('div'); right.style.display='grid'; right.style.gap='4px';
+  const name=document.createElement('div'); name.style.fontWeight='800'; name.textContent=sp.name;
+  const desc=document.createElement('div'); desc.style.opacity='.85'; desc.style.fontSize='13px'; desc.textContent='Pouvoir : '+sp.power+' — '+sp.desc;
+
+  const row=document.createElement('div'); row.className='row';
+  const badge=document.createElement('span'); badge.className='badge'; badge.textContent=sp.id;
+  row.appendChild(badge);
+
+  right.appendChild(name); right.appendChild(desc); right.appendChild(row);
+  div.appendChild(icon); div.appendChild(right);
+
+  if(!disabled){
+    div.addEventListener('click', ()=>{
+      if(forPid===1) Selected1=sp; else Selected2=sp;
+      renderChoices(); updateStartButtonState();
+    });
+    div.addEventListener('dblclick', ()=>{
+      if(updateStartButtonState()) { readOptionsFromOverlay(); startGame(); }
+    });
+  }
+  const sel = forPid===1?Selected1:Selected2;
+  if(sel && sel.id===sp.id){ div.style.outline='2px solid '+sp.color; div.style.boxShadow='0 0 0 4px '+sp.color+'33'; }
+
+  return div;
+}
+
+function renderChoices(){
+  if(UI.choices1){ UI.choices1.innerHTML=''; Species.forEach(sp=>UI.choices1.appendChild(buildChoiceCard(sp,1))); }
+  if(UI.choices2){ UI.choices2.innerHTML=''; Species.forEach(sp=>UI.choices2.appendChild(buildChoiceCard(sp,2))); }
+}
+
+function updateStartButtonState(){
+  if(!UI.overlay) return false;
+  const duo = (UI.overlay.querySelector('input[name="modeSel"]:checked')?.value==='duo');
+  const conflict = (duo && Selected1 && Selected2 && Selected1.id===Selected2.id);
+  const btn = UI.startBtn;
+  if(btn){
+    btn.disabled = !!conflict;
+    btn.textContent = conflict ? "Choisissez deux espèces différentes" : "Jouer";
+  }
+  return !conflict;
+}
+
+function readOptionsFromOverlay(){
+  const root=UI.overlay||document;
+  const sel=root.querySelector('#diffSel');
+  if(sel){
+    const found=DIFFICULTIES.find(d=>d.id===sel.value);
+    if(found) SelectedDifficulty=found;
+  }
+  const modeSel=root.querySelector('input[name="modeSel"]:checked');
+  if(modeSel){ Game.mode=modeSel.value; }
+  // Sécurité : si passage en duo et même espèce, on force J2 à une espèce différente
+  if(Game.mode==='duo' && Selected1 && Selected2 && Selected1.id===Selected2.id){
+    const alt = Species.find(s=>s.id!==Selected1.id);
+    if(alt) Selected2 = alt;
+  }
+}
+
+function attachOverlayEvents(ov){
+  const btn=ov.querySelector('#startBtn');
+  if(btn){
+    btn.addEventListener('click', ()=>{
+      if(!updateStartButtonState()) return;
+      readOptionsFromOverlay();
+      startGame();
+    });
+  }
+  ov.addEventListener('change',(e)=>{
+    if(e.target && e.target.name==='modeSel'){
+      renderChoices();
+      updateStartButtonState();
+    }
+  });
+  ov.addEventListener('keydown', (e)=>{
+    if((e.key==='Enter'||e.key===' ') && updateStartButtonState()){
+      e.preventDefault(); readOptionsFromOverlay(); startGame();
+    }
+  });
+}
+
+function createOverlay(){
+  if(UI.overlay) return;
+  const ov=document.createElement('div'); ov.className='ov'; ov.id='overlay'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.tabIndex=0;
+  const card=document.createElement('div'); card.className='card'; ov.appendChild(card);
+
+  const title=document.createElement('div'); title.className='title'; title.textContent='PACMUSH ODYSSEY — MushRush 🍄';
+  const sub=document.createElement('div'); sub.className='sub'; sub.textContent='Choisis le mode, la difficulté et vos champignons (en 2J : espèces différentes).';
+
+  // Mode
+  const secMode=document.createElement('div'); secMode.className='sectionTitle'; secMode.textContent='Mode de jeu';
+  const rowMode=document.createElement('div'); rowMode.className='row';
+  const r1=document.createElement('label'); r1.className='badge'; r1.style.cursor='pointer';
+  r1.innerHTML='<input type="radio" name="modeSel" value="solo" checked> Solo';
+  const r2=document.createElement('label'); r2.className='badge'; r2.style.cursor='pointer';
+  r2.innerHTML='<input type="radio" name="modeSel" value="duo"> 2 joueurs (même clavier)';
+  rowMode.appendChild(r1); rowMode.appendChild(r2);
+
+  // Difficulté
+  const secDiff=document.createElement('div'); secDiff.className='sectionTitle'; secDiff.textContent='Difficulté';
+  const rowDiff=document.createElement('div'); rowDiff.className='row';
+  const lab=document.createElement('label'); lab.textContent='Mode :'; lab.className='badge'; lab.setAttribute('for','diffSel');
+  const sel=document.createElement('select'); sel.id='diffSel'; sel.className='select'; sel.style.cssText='background:#0e0b13;border:1px solid #ffffff22;border-radius:8px;padding:8px 10px;color:#fff7ea';
+  DIFFICULTIES.forEach(d=>{
+    const o=document.createElement('option'); o.value=d.id; o.textContent=d.label; if(d.id===SelectedDifficulty.id) o.selected=true; sel.appendChild(o);
+  });
+  rowDiff.appendChild(lab); rowDiff.appendChild(sel);
+
+  // Choix champignons
+  const secVar1=document.createElement('div'); secVar1.className='sectionTitle'; secVar1.textContent='Joueur 1 — Variété';
+  const grid1=document.createElement('div'); grid1.id='choices1'; grid1.className='grid';
+  const secVar2=document.createElement('div'); secVar2.className='sectionTitle'; secVar2.textContent='Joueur 2 — Variété (mode 2J)';
+  const grid2=document.createElement('div'); grid2.id='choices2'; grid2.className='grid';
+
+  const footer=document.createElement('div'); footer.className='row'; footer.style.justifyContent='space-between'; footer.style.marginTop='12px';
+  const rowL=document.createElement('div'); rowL.className='row';
+  ['J1: Flèches/Entrée','J2: ZQSD/F','P: pause + CR 3s (début)','O: menu'].forEach(t=>{ const b=document.createElement('span'); b.className='badge'; b.textContent=t; rowL.appendChild(b); });
+  const btn=document.createElement('button'); btn.id='startBtn'; btn.textContent='Jouer'; btn.className='btn';
+  footer.appendChild(rowL); footer.appendChild(btn);
+
+  card.appendChild(title); card.appendChild(sub);
+  card.appendChild(secMode); card.appendChild(rowMode);
+  card.appendChild(secDiff); card.appendChild(rowDiff);
+  card.appendChild(secVar1); card.appendChild(grid1);
+  card.appendChild(secVar2); card.appendChild(grid2);
+  card.appendChild(footer);
+
+  document.body.appendChild(ov);
+  UI.overlay=ov; UI.choices1=grid1; UI.choices2=grid2; UI.startBtn=btn; attachOverlayEvents(ov);
+  renderChoices(); updateStartButtonState();
+  setTimeout(()=>ov.focus(),0);
+}
+
+function openOverlay(){
+  if(UI.overlay) return;
+  Game.paused=true; Game.countdown=0;
+  createOverlay();
+}
+
+function startGame(){
+  if(UI.overlay){ UI.overlay.remove(); UI.overlay=null; }
+  ensureAudio();
+  Game.started=true;
+
+  // Info au lancement : “Appuyez sur P pour lancer”
+  Game.showStartHint = 240; // ~4s d’indication
+  resetMatch(true);
+  UI.diff.textContent=SelectedDifficulty.name;
+}
+
+/* =================== BIOMES, GÉNÉRATION & ÉTAT =================== */
+const BIOMES=[
+  {name:'Forêt humide', sky1:'#2c1f35', sky2:'#0d0a12', moss:'#3fbf7f', soil:'#3b2a21', fog:'#ffffff0f', wall:'#3a2e43', deco:'#95e8b6'},
+  {name:'Clairière dorée', sky1:'#4a2b1a', sky2:'#1a0e08', moss:'#ffd166', soil:'#5a3b2b', fog:'#ffd1660f', wall:'#5a3b2b', deco:'#ffd98a'},
+  {name:'Sous-bois bleuté', sky1:'#203248', sky2:'#0a0f16', moss:'#64d7ff', soil:'#2b303a', fog:'#64d7ff12', wall:'#314459', deco:'#9fe4ff'},
+  {name:'Mousse émeraude', sky1:'#153022', sky2:'#08120c', moss:'#2fd07a', soil:'#1c2a21', fog:'#2fd07a12', wall:'#1e3a2f', deco:'#4ef1a8'}
+];
+let LEVEL_INDEX=0; let BIOME=BIOMES[0];
+const LEVEL_SEEDS=Array.from({length:12},(_,i)=> (i+1)*1337+(i*i*97));
+
+function mulberry32(seed){ let a=(seed>>>0)||0x9E3779B9; return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
+function isGridShape(grid,c,r){ if(!Array.isArray(grid)||grid.length!==r) return false; for(let y=0;y<r;y++){ if(!Array.isArray(grid[y])||grid[y].length!==c) return false; } return true; }
+function genLevel(seed){ const rng=mulberry32(seed==null? (Math.random()*1e9)|0:seed); let maze=createMaze(COLS,ROWS,rng); if(!isGridShape(maze,COLS,ROWS)) maze=createMaze(COLS,ROWS,mulberry32(0xDEADBEEF)); decorateMaze(maze,rng); return maze; }
+function createMaze(w,h,rng){
+  w=Math.max(5,w|0); h=Math.max(5,h|0);
+  const g=Array.from({length:h},()=>Array.from({length:w},()=>1));
+  const stack=[]; const start=[1,1]; g[1][1]=0; stack.push(start);
+  const dirs=[[2,0],[-2,0],[0,2],[0,-2]];
+  while(stack.length){
+    const last=stack[stack.length-1]; const cx=last[0], cy=last[1];
+    for(let i=dirs.length-1;i>0;i--){ const j=(rng()*(i+1))|0; const tmp=dirs[i]; dirs[i]=dirs[j]; dirs[j]=tmp; }
+    let carved=false;
+    for(let d=0;d<dirs.length;d++){
+      const dx=dirs[d][0], dy=dirs[d][1]; const nx=cx+dx, ny=cy+dy;
+      if(nx<=0||ny<=0||nx>=w-1||ny>=h-1) continue;
+      if(g[ny][nx]===1){ g[cy+dy/2][cx+dx/2]=0; g[ny][nx]=0; stack.push([nx,ny]); carved=true; break; }
+    }
+    if(!carved) stack.pop();
+  }
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(g[y][x]===0) g[y][x]=2; // spores
+  for(let x=0;x<w;x++){ g[0][x]=1; g[h-1][x]=1;}
+  for(let y=0;y<h;y++){ g[y][0]=1; g[y][w-1]=1;}
+  return g;
+}
+function decorateMaze(g,rng){
+  if(!Array.isArray(g)||!g.length||!Array.isArray(g[0])) return g;
+  const h=g.length,w=g[0].length;
+  for(let r=0;r<4;r++){
+    const rx=2+((rng()*(w-6))|0), ry=2+((rng()*(h-6))|0);
+    const rw=3+((rng()*6)|0), rh=3+((rng()*6)|0);
+    for(let y=ry;y<Math.min(h-1,ry+rh);y++)
+      for(let x=rx;x<Math.min(w-1,rx+rw);x++) g[y][x]=2;
+  }
+  for(let y=1;y<h-1;y++){
+    for(let x=1;x<w-1;x++){
+      if(g[y][x]===2){
+        const r=rng();
+        if(r<0.03) g[y][x]=4;       // piège
+        else if(r<0.08) g[y][x]=3;  // bonus
+      }
+    }
+  }
+  return g;
+}
+
+/* ============ État jeu ============ */
+const Game={
+  started:false, mode:'solo',
+  grid:null, remaining:0,
+  score1:0, score2:0, lives1:3, lives2:3,
+  paused:false, countdown:0,
+  traps:[], bonuses:[], parasites:[], particles:[],
+  muscariaTrap1:null, muscariaTrap2:null,
+  p1:null, p2:null,
+  servant1:null, servant2:null,
+  blindGlobal:0,
+  levelsToPlay: MATCH_LEVELS_SOLO,
+  showStartHint: 0 // frames restantes pour afficher "Appuyez sur P..."
+};
+
+function gridDims(){ const rows=Array.isArray(Game.grid)?Game.grid.length:0; const cols=rows>0 && Array.isArray(Game.grid[0])?Game.grid[0].length:0; return {cols,rows}; }
+
+function resetMatch(full){
+  full=!!full;
+  Game.score1=0; Game.score2=0; Game.lives1=3; Game.lives2=3;
+  LEVEL_INDEX=0;
+  Game.levelsToPlay = (Game.mode==='duo')? MATCH_LEVELS_DUO : MATCH_LEVELS_SOLO;
+  loadLevel(0,true);
+  UI.mode.textContent=(Game.mode==='duo'?'2 Joueurs':'Solo');
+  UI.p2hud.style.display=(Game.mode==='duo')?'':'none';
+  Game.paused=true; Game.countdown=0;
+}
+
+function loadLevel(i,first=false){
+  BIOME=BIOMES[i%BIOMES.length];
+  const seed=LEVEL_SEEDS[i%LEVEL_SEEDS.length]+i*101;
+  Game.grid=genLevel(seed);
+  Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
+  Game.muscariaTrap1=null; Game.muscariaTrap2=null; Game.remaining=0;
+  const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
+
+  for(let y=0;y<rows;y++){
+    const row=Game.grid[y];
+    for(let x=0;x<cols;x++){
+      const v=row[x];
+      if(v===2) Game.remaining++;
+      if(v===3) Game.bonuses.push({x,y,kind:pickBonusKind((i+y+x)%7)});
+      if(v===4) Game.traps.push({x,y,t:(i+x+y)%2});
+    }
+  }
+  const count= (6+Math.floor(i*0.8));
+  for(let k=0;k<count;k++){
+    const pos=findOpenTile();
+    const base=0.09+Math.min(0.1,i*0.01);
+    const speed=base*SelectedDifficulty.factor;
+    Game.parasites.push({
+      x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind:k%4,
+      scared:0, blind:0,
+      state:'wander',lastSeen:null,path:[],
+      chaos:false, chaosMode:null, chaosTick:0, chaosTarget:null,
+      seedOnce:false, seedCd:0, chaosAte:false,
+      servant:false, servantTime:0, servantOwner:0
+    });
+  }
+
+  // joueurs
+  const cMid=(cols/2)|0, rMid=(rows/2)|0;
+  const left=findOpenNear(cMid-3,rMid), right=findOpenNear(cMid+3,rMid);
+  if(first){
+    Game.p1=makePlayer(left.x,left.y,1,Selected1);
+    if(Game.mode==='duo'){ Game.p2=makePlayer(right.x,right.y,2,Selected2); }
+  }else{
+    Game.p1.x=left.x+0.5; Game.p1.y=left.y+0.5; Game.p1.dir=[0,0];
+    if(Game.mode==='duo' && Game.p2){ Game.p2.x=right.x+0.5; Game.p2.y=right.y+0.5; Game.p2.dir=[0,0]; }
+  }
+
+  buildLayers();
+  UI.lvl.textContent=(i+1);
+  UI.score1.textContent=Game.score1; UI.lives1.textContent=Game.lives1; UI.power1.textContent='—';
+  UI.score2.textContent=Game.score2; UI.lives2.textContent=Game.lives2; UI.power2.textContent='—';
+  UI.diff.textContent=SelectedDifficulty.name;
+  Game.paused=true; Game.countdown=0;
+}
+
+function makePlayer(tx,ty,pid,species){
+  return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
+    powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
+    frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, hunterWindow:0, trumpetTrapImmune:false,
+    respawnFlash: 0 // frames restantes pour clignotement réapparition
+  };
+}
+
+function findOpenTile(){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; for(let t=0;t<4000;t++){ const x=(Math.random()*cols)|0, y=(Math.random()*rows)|0; if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } return {x:1,y:1}; }
+function findOpenNear(cx,cy){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; const maxR=Math.max(cols,rows); for(let r=0;r<maxR;r++){ for(let dy=-r;dy<=r;dy++){ for(let dx=-r;dx<=r;dx++){ const x=cx+dx,y=cy+dy; if(x>=1&&y>=1&&x<cols-1&&y<rows-1){ if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } } } } return findOpenTile(); }
+function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, LEVEL_INDEX*0.012); const speed=base*SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
+  Game.parasites.push({x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind,scared:0,blind:0,state:'wander',lastSeen:null,path:[],chaos:false,chaosMode:null,chaosTarget:null, seedOnce:false, seedCd:0, chaosAte:false, servant:false, servantTime:0, servantOwner:0});
+}
+
+/* Bonus & spores */
+const BonusKinds=['life','speed','power','score','freeze'];
+function pickBonusKind(seed){ return BonusKinds[seed%BonusKinds.length]; }
+function spawnSporeCloud(x,y){ Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'}); Game.parasites.forEach(p=>{ p.scared=200; }); }
+
+/* Couches graphiques */
+function buildLayers(){
+  const theme=makeLayerCanvas(W,H), tctx=theme.getContext('2d');
+  const g=tctx.createLinearGradient(0,0,0,H); g.addColorStop(0,BIOME.sky1); g.addColorStop(1,BIOME.sky2);
+  tctx.fillStyle=g; tctx.fillRect(0,0,W,H);
+  for(let i=0;i<60;i++){ tctx.globalAlpha=0.08; tctx.beginPath(); tctx.arc(Math.random()*W,Math.random()*H,10+Math.random()*30,0,6.28); tctx.fillStyle=BIOME.fog; tctx.fill(); }
+  Game.themeLayer=theme;
+
+  const walls=makeLayerCanvas(W,H), wctx=walls.getContext('2d');
+  const pellets=makeLayerCanvas(W,H), pctx=pellets.getContext('2d');
+  const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
+  for(let y=0;y<rows;y++){
+    const row=Game.grid[y];
+    for(let x=0;x<cols;x++){
+      if(row[x]===1) drawWallCell(wctx,x,y);
+      if(row[x]===2) drawPellet(pctx,x,y);
+    }
+  }
+  Game.wallsLayer=walls; Game.pelletsLayer=pellets;
+}
+function drawWallCell(ctx,x,y){ const px=x*TILE,py=y*TILE; ctx.fillStyle=BIOME.wall; ctx.fillRect(px,py,TILE,TILE); ctx.fillStyle=BIOME.moss; ctx.fillRect(px,py,TILE,4); ctx.fillRect(px,py,4,TILE); ctx.fillStyle='#00000033'; ctx.fillRect(px,py+TILE-4,TILE,4); ctx.fillRect(px+TILE-4,py,4,TILE); }
+function drawPellet(ctx,x,y){ const px=x*TILE+TILE/2, py=y*TILE+TILE/2; ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(px,py,3,0,6.28); ctx.fill(); }
+
+/* =================== IA, GAMEPLAY & RENDU =================== */
+/* Pathfinding & helpers */
+function dims(){ const dm=gridDims(); return {C:dm.cols,R:dm.rows}; }
+function openTile(tx,ty,pl){ const d=dims(); if(!Game.grid||ty<0||tx<0||ty>=d.R||tx>=d.C) return false; const v=Game.grid[ty][tx]; if(v===1){ if(pl&&pl.phase){ if(tx===0||ty===0||tx===d.C-1||ty===d.R-1) return false; return true; } return false; } return true; }
+function isWalkable(tx,ty){ const d=dims(); if(tx<0||ty<0||tx>=d.C||ty>=d.R) return false; return Game.grid[ty][tx]!==1; }
+function neighbors(tx,ty){ return [[1,0],[-1,0],[0,1],[0,-1]].map(d=>[tx+d[0],ty+d[1]]).filter(p=>isWalkable(p[0],p[1])); }
+function bfs(start,goal){ const key=(x,y)=>x+','+y; if(!isWalkable(goal[0],goal[1])) return []; const q=[start]; const came=new Map(); came.set(key(start[0],start[1]), null); while(q.length){ const node=q.shift(); const x=node[0], y=node[1]; if(x===goal[0]&&y===goal[1]) break; const ns=neighbors(x,y); for(let i=0;i<ns.length;i++){ const nx=ns[i][0], ny=ns[i][1]; const k=key(nx,ny); if(!came.has(k)){ came.set(k,[x,y]); q.push([nx,ny]); } } } const path=[]; let cur=goal; const sKey=key(start[0],start[1]); while(cur && key(cur[0],cur[1])!==sKey){ const prev=came.get(key(cur[0],cur[1])); if(!prev) break; path.push(cur); cur=prev; } path.reverse(); return path; }
+function sameRowOrCol(a,b){ return a[0]===b[0] || a[1]===b[1]; }
+function hasLineOfSight(a,b){ if(!sameRowOrCol(a,b)) return false; const ax=a[0], ay=a[1], bx=b[0], by=b[1]; if(ax===bx){ const min=Math.min(ay,by), max=Math.max(ay,by); for(let y=min+1;y<max;y++){ if(Game.grid[y][ax]===1) return false; } return true; } else { const min=Math.min(ax,bx), max=Math.max(ax,bx); for(let x=min+1;x<max;x++){ if(Game.grid[ay][x]===1) return false; } return true; } }
+function randomOpenTile(){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; for(let t=0;t<2000;t++){ const x=(Math.random()*cols)|0, y=(Math.random()*rows)|0; if(isWalkable(x,y)) return [x,y]; } return [1,1]; }
+function findNearestPellet(from){
+  const dm=gridDims(); const cols=dm.cols, rows=dm.rows; let best=null, bestD=1e9;
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){
+    if(Game.grid[y][x]===2){ const d=Math.abs(x-from[0])+Math.abs(y-from[1]); if(d<bestD){ bestD=d; best=[x,y]; } }
+  } return best;
+}
+
+/* Serviteur Girolle */
+function convertToServant(p, ownerPid){
+  p.servant=true; p.servantTime=900; p.servantOwner=ownerPid;
+  p.scared=0; p.blind=0; p.path=[]; p.lastSeen=null; p.chaos=false; p.chaosMode=null; p.chaosTarget=null;
+  if(ownerPid===1) Game.servant1=p; else Game.servant2=p;
+}
+function releaseServant(ownerPid){
+  const s = ownerPid===1? Game.servant1 : Game.servant2;
+  if(s){ s.servant=false; s.servantTime=0; s.servantOwner=0; if(ownerPid===1) Game.servant1=null; else Game.servant2=null; }
+}
+
+/* Bonus */
+function eatBonusFor(player,b){
+  Game.grid[b.y][b.x]=0;
+  switch(b.kind){
+    case 'life':
+      if(player.pid===1){ Game.lives1++; UI.lives1.textContent=Game.lives1; } else { Game.lives2++; UI.lives2.textContent=Game.lives2; }
+      sfxLife(); break;
+    case 'speed':
+      player.speed*=1.4; setTimeout(()=>{ player.speed/=1.4; },6000); sfxPower(); break;
+    case 'power':
+      player.nextPowerExtend=(player.nextPowerExtend||0)+120; // +2s
+      (player.pid===1?UI.power1:UI.power2).textContent='★ prêt (+2s)'; sfxPower();
+      break;
+    case 'score':
+      if(player.pid===1){ Game.score1+=500; UI.score1.textContent=Game.score1; } else { Game.score2+=500; UI.score2.textContent=Game.score2; }
+      sfxPower(); break;
+    case 'freeze':
+      Game.parasites.forEach(p=>{ p.scared=300; }); sfxPower(); break;
+  }
+}
+function refreshPelletCell(x,y){ if(!Game.pelletsLayer) return; const pctx=Game.pelletsLayer.getContext('2d'); pctx.clearRect(x*TILE,y*TILE,TILE,TILE); }
+
+/* Entrées direction */
+function inputDirFor(pid){
+  if(pid===1){
+    if(Keys['arrowup']) return [0,-1];
+    if(Keys['arrowdown']) return [0,1];
+    if(Keys['arrowleft']) return [-1,0];
+    if(Keys['arrowright']) return [1,0];
+  } else {
+    if(Keys['z']) return [0,-1];
+    if(Keys['s']) return [0,1];
+    if(Keys['q']) return [-1,0];
+    if(Keys['d']) return [1,0];
+  }
+  return [0,0];
+}
+
+/* Boucle principale */
+let LAST=now();
+function loop(){
+  const t=now(); const dt=(t-LAST)/16.666; LAST=t;
+  if(Game.countdown>0) updateCountdown();
+  if(!Game.paused && Game.countdown===0) update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+function startCountdown(frames){ Game.countdown=Math.max(1,frames|0); Game.paused=false; }
+function updateCountdown(){ Game.countdown--; if(Game.countdown<=0){ Game.countdown=0; } }
+
+/* Update */
+function update(dt){
+  if(!Game.grid) return;
+
+  updatePlayer(Game.p1, dt);
+  if(Game.mode==='duo' && Game.p2) updatePlayer(Game.p2, dt);
+
+  // Parasites
+  Game.parasites.forEach(p=>{
+    if(p.scared>0) p.scared--;
+    if(p.blind>0) p.blind--;
+    const eTile=[Math.max(0,Math.floor(p.x)), Math.max(0,Math.floor(p.y))];
+
+    // pièges Amanite par joueur
+    if(!p.servant){
+      if(Game.muscariaTrap1 && Game.muscariaTrap1.active && eTile[0]===Game.muscariaTrap1.x && eTile[1]===Game.muscariaTrap1.y){
+        const rt=randomOpenTile(); p.x=rt[0]+0.5; p.y=rt[1]+0.5; p.path=[]; p.lastSeen=null; p.chaosTarget=null;
+      }
+      if(Game.muscariaTrap2 && Game.muscariaTrap2.active && eTile[0]===Game.muscariaTrap2.x && eTile[1]===Game.muscariaTrap2.y){
+        const rt=randomOpenTile(); p.x=rt[0]+0.5; p.y=rt[1]+0.5; p.path=[]; p.lastSeen=null; p.chaosTarget=null;
+      }
+    }
+
+    // Serviteur : collecte pour son propriétaire
+    if(p.servant){
+      p.servantTime--; if(p.servantTime<=0){ p.servant=false; if(p.servantOwner===1 && Game.servant1===p) Game.servant1=null; if(p.servantOwner===2 && Game.servant2===p) Game.servant2=null; }
+      const target=findNearestPellet([Math.floor(p.x),Math.floor(p.y)]);
+      const effspd=p.speed*dt*1.05;
+      if(target){
+        const tx=target[0]+0.5, ty=target[1]+0.5;
+        const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+        p.x+=(dx/len)*effspd; p.y+=(dy/len)*effspd; p.dir=[Math.sign(dx),Math.sign(dy)];
+        if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05){
+          const gx=target[0], gy=target[1];
+          if(Game.grid[gy] && Game.grid[gy][gx]===2){
+            Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
+            if(p.servantOwner===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else if(p.servantOwner===2){ Game.score2+=10; UI.score2.textContent=Game.score2; }
+          }
+        }
+      }
+      return;
+    }
+
+    // Aveugle : errance lente
+    if(p.blind>0){
+      const eff=p.speed*dt*0.5;
+      if(!p.path || p.path.length===0 || Math.random()<0.15){
+        const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0],eTile[1]+d[1]));
+        p.path = opts.length ? [[eTile[0]+opts[0][0], eTile[1]+opts[0][1]]] : [];
+      }
+      if(p.path && p.path.length){
+        const tx=p.path[0][0]+0.5, ty=p.path[0][1]+0.5;
+        const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+        p.x+=(dx/len)*eff; p.y+=(dy/len)*eff; p.dir=[Math.sign(dx),Math.sign(dy)];
+        if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05) p.path.shift();
+      }
+      parasiteHitPlayers(p);
+      return;
+    }
+
+    // CHAOS (Morille)
+    if(p.scared>0){
+      p.chaos=true;
+      if(p.chaosTick<=0 || !p.chaosMode){
+        let assigned=false;
+        if(!p.chaosAte && Math.random()<0.10){
+          const near=findNearestPellet(eTile);
+          if(near){ p.chaosMode='eatpellet'; p.chaosTarget=near.slice(0); assigned=true; }
+        }
+        if(!assigned){
+          const modes=['freeze','uturn','bounce','random'];
+          p.chaosMode=modes[(Math.random()*modes.length)|0];
+          p.chaosTarget=null;
+        }
+        p.chaosTick=20+((Math.random()*30)|0);
+      } else { p.chaosTick--; }
+
+      if(p.seedCd>0) p.seedCd--;
+      if(!p.seedOnce && p.seedCd<=0){
+        p.seedCd=60;
+        if(Math.random()<0.10){
+          const bx=eTile[0], by=eTile[1];
+          if(Game.grid[by] && (Game.grid[by][bx]===0 || Game.grid[by][bx]===2)){
+            const exists=Game.bonuses.some(b=>b.x===bx && b.y===by);
+            if(!exists){
+              const kinds=['score','power','freeze'];
+              Game.bonuses.push({x:bx,y:by,kind:kinds[(Math.random()*kinds.length)|0]});
+              p.seedOnce=true;
+            }
+          }
+        }
+      }
+
+      const stepTo=(gx,gy,spd)=>{
+        const tx=gx+0.5, ty=gy+0.5; const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+        p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
+        if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05){ p.x=tx; p.y=ty; return true; }
+        return false;
+      };
+      const speed=p.speed*dt*0.7;
+
+      if(p.chaosMode==='freeze'){
+      } else if(p.chaosMode==='eatpellet'){
+        if(!p.chaosTarget){ p.chaosMode='random'; }
+        else {
+          const reached=stepTo(p.chaosTarget[0], p.chaosTarget[1], speed*1.1);
+          if(reached){
+            const gx=p.chaosTarget[0], gy=p.chaosTarget[1];
+            if(Game.grid[gy] && Game.grid[gy][gx]===2){
+              Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
+            }
+            p.chaosAte=true; p.chaosMode='random'; p.chaosTarget=null;
+          }
+        }
+      } else if(p.chaosMode==='uturn'){
+        const back=[-(p.dir[0]||0),-(p.dir[1]||0)];
+        let gx=eTile[0]+back[0], gy=eTile[1]+back[1];
+        if(!isWalkable(gx,gy)){
+          const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
+          if(opts.length){ const d=opts[(Math.random()*opts.length)|0]; gx=eTile[0]+d[0]; gy=eTile[1]+d[1]; } else { gx=eTile[0]; gy=eTile[1]; }
+        }
+        stepTo(gx,gy,speed);
+      } else if(p.chaosMode==='bounce'){
+        if(!p.chaosTarget){
+          const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
+          p.chaosTarget = opts.length ? [eTile[0]+opts[0][0], eTile[1]+opts[0][1]] : [eTile[0],eTile[1]];
+        }
+        const reached=stepTo(p.chaosTarget[0],p.chaosTarget[1],speed);
+        if(reached){
+          const ox=eTile[0], oy=eTile[1];
+          p.chaosTarget=[ox*2-p.chaosTarget[0], oy*2-p.chaosTarget[1]];
+          if(!isWalkable(p.chaosTarget[0], p.chaosTarget[1])) p.chaosTarget=[ox,oy];
+        }
+      } else {
+        if(!p.chaosTarget || Math.random()<0.2){
+          const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
+          if(opts.length){ const d=opts[(Math.random()*opts.length)|0]; p.chaosTarget=[eTile[0]+d[0], eTile[1]+d[1]]; } else { p.chaosTarget=[eTile[0],eTile[1]]; }
+        }
+        stepTo(p.chaosTarget[0], p.chaosTarget[1], speed*0.9);
+      }
+      parasiteHitPlayers(p);
+      return;
+    }
+
+    // normal
+    p.chaos=false; p.chaosMode=null; p.chaosTarget=null;
+
+    // cible : joueur visible le plus proche/aligné
+    const p1=Game.p1, p2=(Game.mode==='duo'?Game.p2:null);
+    const eTile1=[Math.floor(p1.x),Math.floor(p1.y)];
+    let target=null;
+    const sees1 = !p1.invisible && (hasLineOfSight(eTile, eTile1) || (Math.abs(eTile[0]-eTile1[0])+Math.abs(eTile[1]-eTile1[1])<=6));
+    if(sees1) target=eTile1;
+    if(p2 && !p2.invisible){
+      const eTile2=[Math.floor(p2.x),Math.floor(p2.y)];
+      const sees2 = hasLineOfSight(eTile, eTile2) || (Math.abs(eTile[0]-eTile2[0])+Math.abs(eTile[1]-eTile2[1])<=6);
+      if(sees2){
+        const d1=target? (Math.abs(eTile[0]-target[0])+Math.abs(eTile[1]-target[1])) : 1e9;
+        const d2= Math.abs(eTile[0]-eTile2[0])+Math.abs(eTile[1]-eTile2[1]);
+        if(d2<d1) target=eTile2;
+      }
+    }
+
+    if(target){ p.state='chase'; p.lastSeen=[target[0],target[1]]; p.path=bfs(eTile, target); }
+    else if(p.lastSeen){
+      if(eTile[0]===p.lastSeen[0] && eTile[1]===p.lastSeen[1]){ p.lastSeen=null; p.state='search'; p.target=randomOpenTile(); p.path=bfs(eTile, p.target); }
+      else { p.state='search'; p.path=bfs(eTile, p.lastSeen); }
+    } else {
+      if(!p.path || p.path.length===0){ p.state='wander'; p.target=randomOpenTile(); p.path=bfs(eTile, p.target); }
+    }
+
+    if(!p.path || p.path.length===0){
+      const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0],eTile[1]+d[1]));
+      if(opts.length){ const d=opts[(Math.random()*opts.length)|0]; p.path=[[eTile[0]+d[0], eTile[1]+d[1]]]; }
+    }
+
+    const spd=p.speed*dt;
+    if(p.path && p.path.length){
+      const tx=p.path[0][0], ty=p.path[0][1];
+      const targetX=tx+0.5, targetY=ty+0.5;
+      const dx=targetX-p.x, dy=targetY-p.y, len=Math.hypot(dx,dy)||1;
+      p.x += (dx/len)*spd; p.y += (dy/len)*spd; p.dir=[Math.sign(dx), Math.sign(dy)];
+      if(Math.abs(p.x-targetX)<0.05 && Math.abs(p.y-targetY)<0.05){ p.x=targetX; p.y=targetY; p.path.shift(); }
+    }
+    parasiteHitPlayers(p);
+  });
+
+  // Particules
+  for(let i=Game.particles.length-1;i>=0;i--){
+    const pa=Game.particles[i];
+    if(pa.type==='cloud'){ pa.r+=2*dt; pa.life-=1*dt; if(pa.life<=0) Game.particles.splice(i,1); }
+  }
+
+  // Fin de niveau / match
+  if(Game.remaining<=0){
+    sfxWin();
+    LEVEL_INDEX++;
+    if(LEVEL_INDEX>=Game.levelsToPlay){
+      if(Game.mode==='duo'){
+        if(Game.lives1<0 && Game.lives2>=0) { endMatch('J2 gagne — dernier vivant !'); return; }
+        if(Game.lives2<0 && Game.lives1>=0) { endMatch('J1 gagne — dernier vivant !'); return; }
+        if(Game.score1>Game.score2) endMatch('Fin — J1 gagne au score !');
+        else if(Game.score2>Game.score1) endMatch('Fin — J2 gagne au score !');
+        else endMatch('Fin — Égalité parfaite !');
+      } else {
+        LEVEL_INDEX=0; Game.lives1++; UI.lives1.textContent=Game.lives1;
+        loadLevel(LEVEL_INDEX);
+      }
+    } else {
+      loadLevel(LEVEL_INDEX);
+    }
+  }
+}
+
+function parasiteHitPlayers(p){
+  const hitP1 = distance(p.x,p.y, Game.p1.x,Game.p1.y) < 0.6;
+  if(hitP1) playerHit(Game.p1);
+  if(Game.mode==='duo' && Game.p2){
+    const hitP2 = distance(p.x,p.y, Game.p2.x,Game.p2.y) < 0.6;
+    if(hitP2) playerHit(Game.p2);
+  }
+}
+
+/* Mort / Réapparition SANS pause + flash 5s */
+function playerHit(pl){
+  if(pl.invisible) return;
+  if(pl.shield){ pl.shield=false; (pl.pid===1?UI.power1:UI.power2).textContent='—'; return; }
+  sfxHit();
+  if(pl.pid===1){ Game.lives1--; UI.lives1.textContent=Game.lives1; }
+  else { Game.lives2--; UI.lives2.textContent=Game.lives2; }
+
+  // Victoire immédiate en duo (dernier vivant)
+  if(Game.mode==='duo'){
+    const p1Alive=Game.lives1>=0, p2Alive=Game.lives2>=0;
+    if(!p1Alive && p2Alive){ endMatch('J2 gagne — dernier vivant !'); return; }
+    if(!p2Alive && p1Alive){ endMatch('J1 gagne — dernier vivant !'); return; }
+  }
+
+  // Solo : reset complet si vies < 0
+  if((pl.pid===1?Game.lives1:Game.lives2)<0){
+    Game.lives1=3; Game.score1=0; LEVEL_INDEX=0; UI.lives1.textContent=Game.lives1; UI.score1.textContent=Game.score1;
+    loadLevel(LEVEL_INDEX);
+    return;
+  }
+
+  // Réapparition immédiate + flash 5s
+  const s=findOpenTile(); pl.x=s.x+0.5; pl.y=s.y+0.5; pl.dir=[0,0];
+  pl.respawnFlash = 5*60; // 5 secondes
+  pl.invisible=false; pl.phase=false; pl.spinning=false; pl.frozenTimer=0;
+}
+
+/* Update joueur */
+function updatePlayer(pl, dt){
+  if(!pl) return;
+  pl.anim+=dt;
+  if(pl.respawnFlash>0) pl.respawnFlash--;
+  if(pl.hunterWindow>0) pl.hunterWindow--;
+  if(pl.powerTimer>0){
+    pl.powerTimer--;
+    if(pl.powerTimer<=0){
+      pl.invisible=false; pl.speedBoost=1; pl.spinning=false; pl.shield=false; pl.phase=false;
+      pl.girolleTrapImmune=false; pl.trumpetTrapImmune=false;
+      (pl.pid===1?UI.power1:UI.power2).textContent='—';
+    }
+  }
+  const want=inputDirFor(pl.pid); if(want[0]||want[1]) pl.nextDir=want.slice(0);
+  const tx=Math.floor(pl.x), ty=Math.floor(pl.y); const cx=tx+0.5, cy=ty+0.5; const TURN_EPS=0.45;
+  if(pl.frozenTimer>0){ pl.frozenTimer--; pl.dir=[0,0]; }
+  else {
+    if((pl.nextDir[0]||pl.nextDir[1])){
+      const nearAxis = pl.nextDir[0]!==0 ? Math.abs(pl.y-cy)<TURN_EPS : Math.abs(pl.x-cx)<TURN_EPS;
+      if(nearAxis && openTile(tx+pl.nextDir[0], ty+pl.nextDir[1], pl)){ if(pl.nextDir[0]!==0) pl.y=cy; else pl.x=cx; pl.dir=pl.nextDir.slice(0); }
+    }
+    const spd=pl.speed*(pl.speedBoost||1)*dt;
+    if(pl.dir[0]!==0){
+      const sign=pl.dir[0]; let toX=pl.x+sign*spd;
+      const fromTileX=Math.floor(pl.x); const toTileX=Math.floor(toX);
+      if(toTileX!==fromTileX){ const ahead=fromTileX+(sign>0?1:-1); if(openTile(ahead,ty,pl)) { pl.x=toX; } else { pl.x=fromTileX+0.5; pl.dir=[0,0]; } } else { pl.x=toX; }
+      pl.y += clamp(cy-pl.y,-0.3,0.3)*0.6;
+    }
+    if(pl.dir[1]!==0){
+      const sign=pl.dir[1]; let toY=pl.y+sign*spd;
+      const fromTileY=Math.floor(pl.y); const toTileY=Math.floor(toY);
+      if(toTileY!==fromTileY){ const ahead=fromTileY+(sign>0?1:-1); if(openTile(tx,ahead,pl)) { pl.y=toY; } else { pl.y=fromTileY+0.5; pl.dir=[0,0]; } } else { pl.y=toY; }
+      pl.x += clamp(cx-pl.x,-0.3,0.3)*0.6;
+    }
+  }
+
+  // spores
+  const ntX=Math.floor(pl.x), ntY=Math.floor(pl.y);
+  if(Game.grid[ntY] && Game.grid[ntY][ntX]===2){
+    Game.grid[ntY][ntX]=0; Game.remaining--; sfxEat(); refreshPelletCell(ntX,ntY);
+    if(pl.pid===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else { Game.score2+=10; UI.score2.textContent=Game.score2; }
+  }
+
+  // bonus
+  for(let i=Game.bonuses.length-1;i>=0;i--){
+    const b=Game.bonuses[i];
+    if(b.x===ntX && b.y===ntY){ eatBonusFor(pl,b); Game.bonuses.splice(i,1); }
+  }
+
+  // pièges
+  if(Game.grid[ntY] && Game.grid[ntY][ntX]===4){
+    const idx=Game.traps.findIndex(t=>t.x===ntX && t.y===ntY);
+    if(idx>=0){
+      const trap=Game.traps[idx]; Game.traps.splice(idx,1); Game.grid[ntY][ntX]=0;
+      if(!(pl.species.id==='cornucopioides' && pl.trumpetTrapImmune)){
+        if(trap.t===0){ spawnEnemy(); } else { pl.frozenTimer=5*60; }
+      }
+    }
+  }
+
+  // Girolle : conversion serviteur si collision pendant la fenêtre
+  if(pl.species.id==='cibarius' && pl.hunterWindow>0){
+    for(const p of Game.parasites){
+      if(!p.servant && distance(p.x,p.y,pl.x,pl.y)<0.6){
+        releaseServant(pl.pid);
+        convertToServant(p, pl.pid);
+        pl.hunterWindow=0;
+        break;
+      }
+    }
+  }
+}
+
+/* Rendu */
+function draw(){
+  if(!Game.themeLayer||!Game.wallsLayer){
+    const g=CTX.createLinearGradient(0,0,0,H); g.addColorStop(0,'#1a1620'); g.addColorStop(1,'#0d0a12'); CTX.fillStyle=g; CTX.fillRect(0,0,W,H); return;
+  }
+  CTX.drawImage(Game.themeLayer,0,0);
+  CTX.drawImage(Game.pelletsLayer,0,0);
+  drawTrapsAndBonuses();
+  CTX.drawImage(Game.wallsLayer,0,0);
+
+  Game.particles.forEach(pa=>{
+    if(pa.type==='cloud'){ CTX.globalAlpha=0.2; CTX.beginPath(); CTX.arc(pa.x,pa.y,pa.r,0,6.28); CTX.fillStyle='#ffffff'; CTX.fill(); CTX.globalAlpha=1; }
+  });
+
+  Game.parasites.forEach(p=>{
+    drawParasite(CTX,p.x*TILE,p.y*TILE,TILE*0.9,p.kind,p.servant,(p.blind>0));
+    if(p.scared>0){ CTX.globalAlpha=0.4; CTX.fillStyle='#fff'; CTX.fillRect(p.x*TILE-10,p.y*TILE-10,20,20); CTX.globalAlpha=1; }
+  });
+
+  if(Game.p1) drawPlayerEntity(Game.p1);
+  if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
+
+  // Indication de départ : “Appuyez sur P…”
+  if(Game.showStartHint>0){
+    Game.showStartHint--;
+    CTX.save();
+    CTX.globalAlpha = 0.85*(Math.sin(performance.now()/250)*0.5+0.5);
+    CTX.fillStyle='#00000088'; CTX.fillRect(W*0.25,H*0.42,W*0.5,80);
+    CTX.globalAlpha=1;
+    CTX.fillStyle='#fff'; CTX.font='bold 26px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
+    CTX.fillText('Appuyez sur P pour lancer la partie', W/2, H*0.5);
+    CTX.restore();
+  }
+
+  // État pause / compte à rebours (uniquement au début / via P)
+  if(Game.paused && Game.countdown===0){
+    CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H);
+    CTX.globalAlpha=1; CTX.fillStyle='#fff'; CTX.font='bold 42px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
+    CTX.fillText('PAUSE — P pour lancer', W/2, H*0.5); CTX.restore();
+  } else if(Game.countdown>0){
+    const sec=Math.ceil(Game.countdown/60);
+    CTX.save(); CTX.globalAlpha=0.3; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H); CTX.globalAlpha=1;
+    CTX.fillStyle='#fff'; CTX.font='bold 120px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
+    CTX.fillText(sec.toString(), W/2, H*0.5); CTX.restore();
+  }
+}
+
+function drawTrapsAndBonuses(){
+  Game.traps.forEach(t=>{
+    const px=t.x*TILE+TILE/2,py=t.y*TILE+TILE/2;
+    CTX.save();
+    if(t.t===0){ CTX.beginPath(); CTX.moveTo(px,py-8); CTX.lineTo(px-8,py+8); CTX.lineTo(px+8,py+8); CTX.closePath(); CTX.fillStyle='#a83b3b'; CTX.fill(); }
+    else { CTX.beginPath(); CTX.ellipse(px,py,10,6,0,0,6.28); CTX.fillStyle='#7fbf7f88'; CTX.fill(); }
+    CTX.restore();
+  });
+  if(Game.muscariaTrap1 && Game.muscariaTrap1.active){
+    const px=Game.muscariaTrap1.x*TILE+TILE/2, py=Game.muscariaTrap1.y*TILE+TILE/2;
+    CTX.save(); CTX.beginPath(); CTX.arc(px,py,13,0,Math.PI*2); CTX.fillStyle='rgba(255,64,128,0.18)'; CTX.fill();
+    CTX.lineWidth=3; CTX.strokeStyle='#ff3b7a'; CTX.stroke(); CTX.font='bold 12px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle='#ffd6e6'; CTX.fillText('π1',px,py); CTX.restore();
+  }
+  if(Game.muscariaTrap2 && Game.muscariaTrap2.active){
+    const px=Game.muscariaTrap2.x*TILE+TILE/2, py=Game.muscariaTrap2.y*TILE+TILE/2;
+    CTX.save(); CTX.beginPath(); CTX.arc(px,py,13,0,Math.PI*2); CTX.fillStyle='rgba(64,128,255,0.18)'; CTX.fill();
+    CTX.lineWidth=3; CTX.strokeStyle='#3b7aff'; CTX.stroke(); CTX.font='bold 12px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle='#d6e0ff'; CTX.fillText('π2',px,py); CTX.restore();
+  }
+  Game.bonuses.forEach(b=>{
+    const px=b.x*TILE+TILE/2,py=b.y*TILE+TILE/2;
+    CTX.save();
+    let col='#fff',label='?';
+    if(b.kind==='life'){col='#ff5c6c';label='❤';}
+    if(b.kind==='speed'){col='#ffe066';label='⚡';}
+    if(b.kind==='power'){col='#9ad6ff';label='★';}
+    if(b.kind==='score'){col='#a1ffa4';label='⨁';}
+    if(b.kind==='freeze'){col='#d8c7ff';label='❄';}
+    CTX.beginPath(); CTX.arc(px,py,10,0,6.28); CTX.fillStyle=col+'33'; CTX.fill(); CTX.strokeStyle=col; CTX.lineWidth=2; CTX.stroke();
+    CTX.font='16px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle=col; CTX.fillText(label,px,py+1);
+    CTX.restore();
+  });
+}
+
+function drawPlayerEntity(pl){
+  const x=pl.x*TILE, y=pl.y*TILE;
+  if(pl.species.id==='cornucopioides') drawTrumpet(CTX,x,y,28,false,(pl.powerTimer>0));
+  else if(pl.species.id==='muscaria') drawAmanita(CTX,x,y,28,false);
+  else if(pl.species.id==='cibarius') drawChanterelle(CTX,x,y,28,false);
+  else if(pl.species.id==='edulis') drawCep(CTX,x,y,28,false);
+  else if(pl.species.id==='morchella') drawMorel(CTX,x,y,28,false);
+  else if(pl.species.id==='phalloides') drawPhalloides(CTX,x,y,28,false);
+
+  if(pl.frozenTimer>0){
+    CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#9ad6ff';
+    CTX.beginPath(); CTX.arc(x, y, 16, 0, Math.PI*2); CTX.fill(); CTX.restore();
+  }
+  if(pl.powerTimer>0){
+    const r=12+(Math.sin(performance.now()/120)+1)*6;
+    CTX.beginPath(); CTX.arc(x,y,r,0,Math.PI*2);
+    CTX.lineWidth=2; CTX.strokeStyle='rgba(255,255,255,0.55)'; CTX.stroke();
+  }
+  // FLASH réapparition (clignote 5 s)
+  if(pl.respawnFlash>0){
+    const t=performance.now()/120;
+    const blink = (Math.floor(t)%2===0) ? 0.85 : 0.35;
+    const r=22 + 6*Math.sin(performance.now()/180);
+    CTX.save();
+    CTX.globalAlpha = blink;
+    CTX.beginPath(); CTX.arc(x,y,r,0,Math.PI*2);
+    CTX.lineWidth=4; CTX.strokeStyle='rgba(255,255,180,0.95)';
+    CTX.stroke();
+    CTX.restore();
+  }
+}
+
+/* Fin de match */
+function endMatch(message){
+  Game.paused=true; Game.countdown=0;
+  const ov=document.createElement('div'); ov.className='ov'; const card=document.createElement('div'); card.className='card'; ov.appendChild(card);
+  const t=document.createElement('div'); t.className='title'; t.textContent=message; card.appendChild(t);
+  const sub=document.createElement('div'); sub.className='sub';
+  sub.textContent=`Scores — J1: ${Game.score1} · J2: ${Game.score2}`;
+  card.appendChild(sub);
+  const btn=document.createElement('button'); btn.className='btn'; btn.textContent='Rejouer'; btn.addEventListener('click', ()=>{ ov.remove(); openOverlay(); });
+  card.appendChild(btn);
+  document.body.appendChild(ov);
+}
+
+/* Auto tests + Init */
+(function selfTests(){ try{
+  console.assert(COLS>0&&ROWS>0,'grid dims');
+  const m=genLevel(12345);
+  console.assert(isGridShape(m,COLS,ROWS),'maze dims');
+  const pellets=m.flat().filter(v=>v===2).length; console.assert(pellets>COLS,'pellets enough');
+  console.assert(typeof findNearestPellet==='function','nearest pellet helper');
+} catch(e){ console.error('Self-tests failed',e); }})();
+
+function init(){ createOverlay(); loop(); }
+if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); } else { init(); }
+
+/* =================== FIN =================== */
+</script>
+</body>
+</html>
