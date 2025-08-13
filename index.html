@@ -76,21 +76,38 @@ const MATCH_LEVELS_SOLO=12;
 const MATCH_LEVELS_DUO=4;
 
 /* ============ Assets (sprites PNG fournis) ============ */
-const SPRITES = {
-  trumpet: loadImg('champignon_1.png'),
-  morel:   loadImg('champignon_2.png'),
-  phallo:  loadImg('champignon_3.png'),
-  cep:     loadImg('champignon_4.png'),
-  musc:    loadImg('champignon_5_bordered.png'),
-  giro:    loadImg('champignon_6_bordered.png'),
+/* Jeu = sprite en jeu ; UI = sprite du menu (souvent version "bordered" et plus lisible) */
+/* TODO: Mets ci-dessous le BON fichier pour chaque espèce.
+   Tu as confirmé que le CÈPE (edulis) = champignon_4.png. Les autres sont à corriger si besoin. */
+const SPRITES_BY_SPECIES = {
+  cornucopioides: { game: 'champignon_6_bordered.png',          ui: 'champignon_6_bordered.png' },          // Trompette de la mort
+  muscaria:       { game: 'champignon_3.png', ui: 'champignon_3.png' }, // Amanite tue-mouches
+  cibarius:       { game: 'champignon_1.png', ui: 'champignon_1.png' }, // Girolle
+  edulis:         { game: 'champignon_4.png',          ui: 'champignon_4.png' },          // CÈPE
+  morchella:      { game: 'champignon_5_bordered.png',          ui: 'champignon_5_bordered.png' },          // Morille
+  phalloides:     { game: 'champignon_2.png',          ui: 'champignon_2.png' },          // Amanite phalloïde
 };
+
+const _IMG_CACHE = new Map();
 function loadImg(src){
-  const i=new Image(); i.src=src; i.decoding='async'; i.loading='eager'; return i;
+  if(_IMG_CACHE.has(src)) return _IMG_CACHE.get(src);
+  const i=new Image(); i.src=src; i.decoding='async'; i.loading='eager';
+  _IMG_CACHE.set(src,i);
+  return i;
 }
-function drawImgCentered(img, x, y, s){
-  if(!img || !img.complete) return;
-  const w = s, h = s;
-  CTX.drawImage(img, x - w/2, y - h/2, w, h);
+function getSpritePath(speciesId, forUI=false){
+  const rec = SPRITES_BY_SPECIES[speciesId];
+  if(!rec) return null;
+  return forUI ? rec.ui : rec.game;
+}
+function drawImgCenteredPath(path, x, y, s, ghost=false){
+  if(!path) return;
+  const img = loadImg(path);
+  if(!img.complete) return;
+  CTX.save();
+  if(ghost) CTX.globalAlpha = 0.8;
+  CTX.drawImage(img, x - s/2, y - s/2, s, s);
+  CTX.restore();
 }
 
 /* ============ Entrées clavier ============ */
@@ -145,18 +162,31 @@ function sfxLife(){ if(!ACTX) return; const t=ACTX.currentTime; [660,990,1320].f
 function startMusic(){ if(!ACTX) return; const bpm=128, beat=60/bpm; const len=8*beat; (function loop(){ const t=ACTX.currentTime+0.05; const seq=[660,660,495,660,825,660,495,440]; const bass=[110,110,82,110,147,110,82,73]; for(let i=0;i<8;i++){ const nt=t+i*beat; tone(nt,seq[i],.18,'triangle',.07); tone(nt,bass[i],.25,'sine',.05);} setTimeout(loop,len*1000);}()) }
 CANVAS.addEventListener('click', ensureAudio);
 
-/* ============ Dessin entités avec sprites PNG ============ */
-function drawTrumpet(ctx,cx,cy,size,icon,ghost){
-  CTX.save();
-  if(ghost){ CTX.globalAlpha = 0.8; }
-  drawImgCentered(SPRITES.trumpet, cx, cy, size*1.15);
-  CTX.restore();
+/* ============ Dessin entités avec sprites PNG par espèce ============ */
+function drawTrumpet(ctx, cx, cy, size, icon, ghost){
+  const p = getSpritePath('cornucopioides', !!icon);
+  drawImgCenteredPath(p, cx, cy, size*1.15, !!ghost);
 }
-function drawAmanita(ctx,cx,cy,size){ drawImgCentered(SPRITES.musc, cx, cy, size*1.15); }
-function drawChanterelle(ctx,cx,cy,size){ drawImgCentered(SPRITES.giro, cx, cy, size*1.15); }
-function drawCep(ctx,cx,cy,size){ drawImgCentered(SPRITES.cep, cx, cy, size*1.15); }
-function drawMorel(ctx,cx,cy,size){ drawImgCentered(SPRITES.morel, cx, cy, size*1.15); }
-function drawPhalloides(ctx,cx,cy,size){ drawImgCentered(SPRITES.phallo, cx, cy, size*1.15); }
+function drawAmanita(ctx, cx, cy, size, icon){
+  const p = getSpritePath('muscaria', !!icon);
+  drawImgCenteredPath(p, cx, cy, size*1.15, false);
+}
+function drawChanterelle(ctx, cx, cy, size, icon){
+  const p = getSpritePath('cibarius', !!icon);
+  drawImgCenteredPath(p, cx, cy, size*1.15, false);
+}
+function drawCep(ctx, cx, cy, size, icon){
+  const p = getSpritePath('edulis', !!icon); // Cèpe confirmé
+  drawImgCenteredPath(p, cx, cy, size*1.15, false);
+}
+function drawMorel(ctx, cx, cy, size, icon){
+  const p = getSpritePath('morchella', !!icon);
+  drawImgCenteredPath(p, cx, cy, size*1.15, false);
+}
+function drawPhalloides(ctx, cx, cy, size, icon){
+  const p = getSpritePath('phalloides', !!icon);
+  drawImgCenteredPath(p, cx, cy, size*1.15, false);
+}
 
 /* ============ Parasites (ennemis) ============ */
 function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind){
@@ -216,8 +246,15 @@ function buildChoiceCard(sp, forPid){
 
   const div=document.createElement('div');
   div.className='choice'+(disabled?' disabled':'');
-  div.style.cssText='background:#0e0b13;border:1px solid #ffffff1f;border-radius:12px;padding:12px;cursor:pointer;display:flex;gap:10px;align-items:center;';
-  const icon=document.createElement('canvas'); icon.width=56; icon.height=56; const ict=icon.getContext('2d'); sp.draw(ict,28,42,50,true,false);
+div.style.cssText = 'background:#0e0b13;border:1px solid #ffffff1f;border-radius:12px;padding:14px;cursor:pointer;display:flex;gap:12px;align-items:center;';
+  
+  // Icône du menu : plus grande et on force l’usage du sprite "UI" (icon=true)
+const icon = document.createElement('canvas');
+icon.width = 84;  // tu peux mettre 72 si tu préfères
+icon.height = 84;
+const ict = icon.getContext('2d');
+// centre + taille généreuse pour que l’image UI (bordered) soit bien visible
+sp.draw(ict, icon.width/2, icon.height/2, 76, true, false);
 
   const right=document.createElement('div'); right.style.display='grid'; right.style.gap='4px';
   const name=document.createElement('div'); name.style.fontWeight='800'; name.textContent=sp.name;
