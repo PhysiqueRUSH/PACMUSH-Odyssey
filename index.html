@@ -64,7 +64,7 @@ const TILE=28;
 const COLS=Math.max(5,(W/TILE)|0);
 const ROWS=Math.max(5,(H/TILE)|0);
 
-/* Difficultés (texte mis à jour : “facile”) */
+/* Difficultés */
 const DIFFICULTIES=[
   {id:'easy', name:'Cueillette du dimanche', label:'Cueillette du dimanche — facile', factor:0.25},
   {id:'medium', name:'Chiens Truffiers', label:'Chiens Truffiers — moyen', factor:0.5},
@@ -76,12 +76,11 @@ const MATCH_LEVELS_SOLO=12;
 const MATCH_LEVELS_DUO=4;
 
 /* ============ Assets (sprites PNG fournis) ============ */
-/* Jeu = sprite en jeu ; UI = sprite du menu (souvent version "bordered" et plus lisible) */
 const SPRITES_BY_SPECIES = {
-  cornucopioides: { game: 'champignon_6_bordered.png', ui: 'champignon_6_bordered.png' }, // Trompette de la mort (à ajuster si besoin)
+  cornucopioides: { game: 'champignon_6_bordered.png', ui: 'champignon_6_bordered.png' }, // Trompette de la mort
   muscaria:       { game: 'champignon_3.png',          ui: 'champignon_3.png' },          // Amanite tue-mouches
   cibarius:       { game: 'champignon_1.png',          ui: 'champignon_1.png' },          // Girolle
-  edulis:         { game: 'champignon_4.png',          ui: 'champignon_4.png' },          // CÈPE (confirmé)
+  edulis:         { game: 'champignon_4.png',          ui: 'champignon_4.png' },          // Cèpe
   morchella:      { game: 'champignon_5_bordered.png', ui: 'champignon_5_bordered.png' }, // Morille
   phalloides:     { game: 'champignon_2.png',          ui: 'champignon_2.png' },          // Amanite phalloïde
 };
@@ -160,7 +159,7 @@ function sfxLife(){ if(!ACTX) return; const t=ACTX.currentTime; [660,990,1320].f
 function startMusic(){ if(!ACTX) return; const bpm=128, beat=60/bpm; const len=8*beat; (function loop(){ const t=ACTX.currentTime+0.05; const seq=[660,660,495,660,825,660,495,440]; const bass=[110,110,82,110,147,110,82,73]; for(let i=0;i<8;i++){ const nt=t+i*beat; tone(nt,seq[i],.18,'triangle',.07); tone(nt,bass[i],.25,'sine',.05);} setTimeout(loop,len*1000);}()) }
 CANVAS.addEventListener('click', ensureAudio);
 
-/* ============ Dessin entités avec sprites PNG par espèce ============ */
+/* ============ Dessin entités ============ */
 function drawTrumpet(ctx, cx, cy, size, icon, ghost){
   const p = getSpritePath('cornucopioides', !!icon);
   drawImgCenteredPath(p, cx, cy, size*1.15, !!ghost);
@@ -174,7 +173,7 @@ function drawChanterelle(ctx, cx, cy, size, icon){
   drawImgCenteredPath(p, cx, cy, size*1.15, false);
 }
 function drawCep(ctx, cx, cy, size, icon){
-  const p = getSpritePath('edulis', !!icon); // Cèpe confirmé
+  const p = getSpritePath('edulis', !!icon);
   drawImgCenteredPath(p, cx, cy, size*1.15, false);
 }
 function drawMorel(ctx, cx, cy, size, icon){
@@ -187,7 +186,7 @@ function drawPhalloides(ctx, cx, cy, size, icon){
 }
 
 /* ============ Parasites (ennemis) ============ */
-function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind){
+function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind,isConfused){
   kind=kind||0; ctx.save(); ctx.translate(cx,cy); const r=size*0.35;
   if(isServant){
     ctx.shadowColor='rgba(64,224,208,0.8)'; ctx.shadowBlur=10;
@@ -205,10 +204,15 @@ function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind){
     ctx.fillStyle=col; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
     ctx.fillStyle='#111'; ctx.fillRect(-r*0.8,-r*0.1,r*1.6,r*0.2);
   }
+  if(isConfused){
+    ctx.fillStyle='#fff'; ctx.globalAlpha=0.9; ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('✳',0,-r*1.6);
+    ctx.globalAlpha=1;
+  }
   ctx.restore();
 }
 
-/* ============ Espèces & pouvoirs (descriptions simplifiées) ============ */
+/* ============ Espèces & pouvoirs ============ */
 const Species=[
   { id:'cornucopioides', name:"Trompette de la mort", power:"Voile total (10s)", desc:"Invisible, parasites aveugles & lents, immunisée aux pièges 10s.", color:'#3d3630',
     draw:(c,x,y,s,icon,ghost)=>drawTrumpet(c,x,y,s,icon,ghost),
@@ -222,7 +226,7 @@ const Species=[
     draw:drawChanterelle,
     use:(me)=>{ me.powerTimer=300; me.hunterWindow=300; UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?'; }
   },
-  { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse l’ennemi.', color:'#7a4f2a',
+  { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse l’ennemi en chaîne.', color:'#7a4f2a',
     draw:drawCep,
     use:(me)=>{ me.powerTimer=360; me.shield=true; }
   },
@@ -246,11 +250,10 @@ function buildChoiceCard(sp, forPid){
   div.className='choice'+(disabled?' disabled':'');
   div.style.cssText = 'background:#0e0b13;border:1px solid #ffffff1f;border-radius:12px;padding:14px;cursor:pointer;display:flex;gap:12px;align-items:center;';
   
-// Icône du menu via PNG UI directement
-const icon = document.createElement('img');
-icon.src = getSpritePath(sp.id, true); // prend SPRITES_BY_SPECIES[sp.id].ui
-icon.alt = sp.name;
-icon.style.cssText = 'width:84px;height:84px;object-fit:contain;image-rendering:crisp-edges;flex:0 0 auto;';
+  const icon = document.createElement('img');
+  icon.src = getSpritePath(sp.id, true);
+  icon.alt = sp.name;
+  icon.style.cssText = 'width:84px;height:84px;object-fit:contain;image-rendering:crisp-edges;flex:0 0 auto;';
 
   const right=document.createElement('div'); right.style.display='grid'; right.style.gap='4px';
   const name=document.createElement('div'); name.style.fontWeight='800'; name.textContent=sp.name;
@@ -304,7 +307,6 @@ function readOptionsFromOverlay(){
   }
   const modeSel=root.querySelector('input[name="modeSel"]:checked');
   if(modeSel){ Game.mode=modeSel.value; }
-  // Sécurité : si passage en duo et même espèce, on force J2 à une espèce différente
   if(Game.mode==='duo' && Selected1 && Selected2 && Selected1.id===Selected2.id){
     const alt = Species.find(s=>s.id!==Selected1.id);
     if(alt) Selected2 = alt;
@@ -396,13 +398,12 @@ function startGame(){
   ensureAudio();
   Game.started=true;
 
-  // Info au lancement : “Appuyez sur P pour lancer”
-  Game.showStartHint = 240; // ~4s d’indication
+  Game.showStartHint = 240; // ~4s
   resetMatch(true);
   UI.diff.textContent=SelectedDifficulty.name;
 }
 
-/* =================== BIOMES, GÉNÉRATION & ÉTAT =================== */
+/* =================== BIOMES, ARBRES (EMOJI) & GÉNÉRATION =================== */
 const BIOMES=[
   {name:'Forêt humide', sky1:'#2c1f35', sky2:'#0d0a12', moss:'#3fbf7f', soil:'#3b2a21', fog:'#ffffff0f', wall:'#3a2e43', deco:'#95e8b6'},
   {name:'Clairière dorée', sky1:'#4a2b1a', sky2:'#1a0e08', moss:'#ffd166', soil:'#5a3b2b', fog:'#ffd1660f', wall:'#5a3b2b', deco:'#ffd98a'},
@@ -411,6 +412,19 @@ const BIOMES=[
 ];
 let LEVEL_INDEX=0; let BIOME=BIOMES[0];
 const LEVEL_SEEDS=Array.from({length:12},(_,i)=> (i+1)*1337+(i*i*97));
+
+/* Jeux d’arbres par niveau (N1 = conifères) */
+const TREE_SETS = [
+  ['🌲','🌲','🌲','🌲','🌲'],                           // 0: conifères (niveau 1)
+  ['🌳','🌿','🍃','🌴','🎋'],                           // 1: feuillus / tropical
+  ['🍁','🍂','🌾','🍃','🌳'],                           // 2: automnal / champs
+  ['🌵','🌴','🎍','🎋','🌳']                            // 3: aride / tropical
+];
+let WALL_EMOJI_SET = TREE_SETS[0];
+function treeEmojiAt(x,y){
+  const i = ( (x*73856093) ^ (y*19349663) ^ (LEVEL_INDEX*83492791) ) >>> 0;
+  return WALL_EMOJI_SET[i % WALL_EMOJI_SET.length];
+}
 
 function mulberry32(seed){ let a=(seed>>>0)||0x9E3779B9; return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
 function isGridShape(grid,c,r){ if(!Array.isArray(grid)||grid.length!==r) return false; for(let y=0;y<r;y++){ if(!Array.isArray(grid[y])||grid[y].length!==c) return false; } return true; }
@@ -469,7 +483,8 @@ const Game={
   servant1:null, servant2:null,
   blindGlobal:0,
   levelsToPlay: MATCH_LEVELS_SOLO,
-  showStartHint: 0 // frames restantes pour afficher "Appuyez sur P..."
+  showStartHint: 0,
+  themeLayer:null, wallsLayer:null, pelletsLayer:null
 };
 
 function gridDims(){ const rows=Array.isArray(Game.grid)?Game.grid.length:0; const cols=rows>0 && Array.isArray(Game.grid[0])?Game.grid[0].length:0; return {cols,rows}; }
@@ -487,6 +502,7 @@ function resetMatch(full){
 
 function loadLevel(i,first=false){
   BIOME=BIOMES[i%BIOMES.length];
+  WALL_EMOJI_SET = TREE_SETS[i % TREE_SETS.length]; // variété par niveau (N1 = conifères)
   const seed=LEVEL_SEEDS[i%LEVEL_SEEDS.length]+i*101;
   Game.grid=genLevel(seed);
   Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
@@ -515,7 +531,9 @@ function loadLevel(i,first=false){
       seedOnce:false, seedCd:0, chaosAte:false,
       servant:false, servantTime:0, servantOwner:0,
       // knockback
-      kbActive:false, kbTx:0, kbTy:0, kbSpeed:0
+      kbActive:false, kbTx:0, kbTy:0, kbSpeed:0, kbDir:[0,0],
+      // confusion (après impact mur)
+      confusedTimer:0
     });
   }
 
@@ -542,8 +560,7 @@ function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, hunterWindow:0, trumpetTrapImmune:false,
-    respawnFlash: 0, // frames restantes pour clignotement réapparition
-    hitGrace: 0
+    respawnFlash: 0, hitGrace: 0
   };
 }
 
@@ -555,8 +572,8 @@ function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, 
     scared:0,blind:0,state:'wander',lastSeen:null,path:[],
     chaos:false,chaosMode:null,chaosTarget:null,seedOnce:false,seedCd:0,chaosAte:false,
     servant:false,servantTime:0,servantOwner:0,
-    // knockback
-    kbActive:false, kbTx:0, kbTy:0, kbSpeed:0
+    kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
+    confusedTimer:0
   });
 }
 
@@ -565,7 +582,7 @@ const BonusKinds=['life','speed','power','score','freeze'];
 function pickBonusKind(seed){ return BonusKinds[seed%BonusKinds.length]; }
 function spawnSporeCloud(x,y){ Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'}); Game.parasites.forEach(p=>{ p.scared=200; }); }
 
-// Repousse les parasites autour du joueur (rayon en cases ; force en cases)
+/* ---------- Repousse radial (fallback) ---------- */
 function repelEnemiesAround(pl, radiusTiles, forceTiles){
   const radius = radiusTiles;
   const force  = forceTiles;
@@ -585,16 +602,20 @@ function repelEnemiesAround(pl, radiusTiles, forceTiles){
   });
 }
 
-/* ---------- Knockback ciblé (Cèpe) ---------- */
-// Calcule le point (en coords "cases") jusqu'au mur dans la direction depuis pl -> p
+/* ---------- Knockback (Cèpe) + effet domino ---------- */
+// calcule la cible mur depuis p en suivant le vecteur depuis pl -> p
 function computeKnockbackTarget(p, pl){
   let dx = p.x - pl.x, dy = p.y - pl.y;
   const len = Math.hypot(dx, dy) || 1;
   dx /= len; dy /= len;
-
-  let lastX = p.x, lastY = p.y;
-  const step = 0.2;      // pas en cases
-  const maxSteps = 200;  // sécurité
+  return computeKnockbackTargetDir({x:p.x, y:p.y}, [dx,dy]);
+}
+// calcule la cible mur depuis origin (obj {x,y} en cases) dans la direction dir ([dx,dy] normalisé)
+function computeKnockbackTargetDir(origin, dir){
+  const step = 0.2;
+  const maxSteps = 220;
+  let lastX = origin.x, lastY = origin.y;
+  const dx = dir[0], dy = dir[1];
   for(let i=0;i<maxSteps;i++){
     const nx = lastX + dx * step;
     const ny = lastY + dy * step;
@@ -621,17 +642,28 @@ function buildLayers(){
   for(let y=0;y<rows;y++){
     const row=Game.grid[y];
     for(let x=0;x<cols;x++){
-      if(row[x]===1) drawWallCell(wctx,x,y);
+      if(row[x]===1) drawWallCell(wctx,x,y);    // <-- murs + emoji
       if(row[x]===2) drawPellet(pctx,x,y);
     }
   }
   Game.wallsLayer=walls; Game.pelletsLayer=pellets;
 }
-function drawWallCell(ctx,x,y){ const px=x*TILE,py=y*TILE; ctx.fillStyle=BIOME.wall; ctx.fillRect(px,py,TILE,TILE); ctx.fillStyle=BIOME.moss; ctx.fillRect(px,py,TILE,4); ctx.fillRect(px,py,4,TILE); ctx.fillStyle='#00000033'; ctx.fillRect(px,py+TILE-4,TILE,4); ctx.fillRect(px+TILE-4,py,4,TILE); }
+function drawWallCell(ctx,x,y){
+  const px=x*TILE,py=y*TILE;
+  ctx.fillStyle=BIOME.wall; ctx.fillRect(px,py,TILE,TILE);
+  ctx.fillStyle=BIOME.moss; ctx.fillRect(px,py,TILE,4); ctx.fillRect(px,py,4,TILE);
+  ctx.fillStyle='#00000033'; ctx.fillRect(px,py+TILE-4,TILE,4); ctx.fillRect(px+TILE-4,py,4,TILE);
+  // --- Emoji arbre au centre (variété par niveau) ---
+  const emoji = treeEmojiAt(x,y);
+  ctx.font = '16px system-ui';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.globalAlpha=0.95;
+  ctx.fillText(emoji, px+TILE/2, py+TILE/2);
+  ctx.globalAlpha=1;
+}
 function drawPellet(ctx,x,y){ const px=x*TILE+TILE/2, py=y*TILE+TILE/2; ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(px,py,3,0,6.28); ctx.fill(); }
 
 /* =================== IA, GAMEPLAY & RENDU =================== */
-/* Pathfinding & helpers */
 function dims(){ const dm=gridDims(); return {C:dm.cols,R:dm.rows}; }
 function openTile(tx,ty,pl){ const d=dims(); if(!Game.grid||ty<0||tx<0||ty>=d.R||tx>=d.C) return false; const v=Game.grid[ty][tx]; if(v===1){ if(pl&&pl.phase){ if(tx===0||ty===0||tx===d.C-1||ty===d.R-1) return false; return true; } return false; } return true; }
 function isWalkable(tx,ty){ const d=dims(); if(tx<0||ty<0||tx>=d.C||ty>=d.R) return false; return Game.grid[ty][tx]!==1; }
@@ -716,31 +748,73 @@ function update(dt){
   if(Game.mode==='duo' && Game.p2) updatePlayer(Game.p2, dt);
 
   // Parasites
-  Game.parasites.forEach(p=>{
-    // ---------- Knockback prioritaire ----------
+  Game.parasites.forEach((p,idx)=>{
+    // ---------- Knockback prioritaire + effet domino ----------
     if(p.kbActive){
       const dx = p.kbTx - p.x;
       const dy = p.kbTy - p.y;
       const dist = Math.hypot(dx, dy);
-      const spd = (p.kbSpeed || 0.22) * dt; // 0.22 ~ 2*0.11 si pas défini
+      const nx = (dist>0? dx/dist : 0), ny = (dist>0? dy/dist : 0);
+      const spd = (p.kbSpeed || 0.22) * dt;
+      p.kbDir = [nx,ny];
       if(dist <= 0.05){
+        // Arrivé au mur -> confusion 3 s
         p.x = p.kbTx; p.y = p.kbTy;
         p.kbActive = false;
+        p.confusedTimer = Math.max(p.confusedTimer, 180);
       } else {
-        const nx = dx / (dist || 1), ny = dy / (dist || 1);
         p.x += nx * spd;
         p.y += ny * spd;
         p.dir = [Math.sign(nx), Math.sign(ny)];
+
+        // Collision avec d'autres parasites -> propulsion en ligne droite
+        for(let j=0;j<Game.parasites.length;j++){
+          if(j===idx) continue;
+          const q = Game.parasites[j];
+          if(q.kbActive || q.servant) continue;
+          if(distance(p.x,p.y,q.x,q.y) < 0.55){
+            // Propel q dans la même direction que p
+            const tgt = computeKnockbackTargetDir(q, p.kbDir);
+            q.kbActive = true;
+            q.kbTx = tgt.x; q.kbTy = tgt.y;
+            q.kbSpeed = Math.max(p.kbSpeed, q.speed*2);
+            q.kbDir = [p.kbDir[0], p.kbDir[1]];
+            q.path = []; q.lastSeen = null;
+            q.scared = Math.max(q.scared, 90);
+          }
+        }
       }
-      parasiteHitPlayers(p); // peut heurter l'autre joueur pendant la trajectoire
-      return; // saute l'IA normale tant que knockback actif
+      parasiteHitPlayers(p);
+      return; // tant que knockback actif
+    }
+
+    // Confusion (après impact mur)
+    if(p.confusedTimer>0){
+      p.confusedTimer--;
+      const eff = p.speed * dt * 0.4; // lent
+      // petit erratisme
+      if(Math.random()<0.25){
+        const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(Math.floor(p.x)+d[0],Math.floor(p.y)+d[1]));
+        if(opts.length){
+          const d=opts[(Math.random()*opts.length)|0];
+          p.path = [[Math.floor(p.x)+d[0], Math.floor(p.y)+d[1]]];
+        }
+      }
+      if(p.path && p.path.length){
+        const tx=p.path[0][0]+0.5, ty=p.path[0][1]+0.5;
+        const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+        p.x+=(dx/len)*eff; p.y+=(dy/len)*eff; p.dir=[Math.sign(dx),Math.sign(dy)];
+        if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05) p.path.shift();
+      }
+      parasiteHitPlayers(p);
+      return;
     }
 
     if(p.scared>0) p.scared--;
     if(p.blind>0) p.blind--;
     const eTile=[Math.max(0,Math.floor(p.x)), Math.max(0,Math.floor(p.y))];
 
-    // pièges Amanite par joueur
+    // pièges Amanite (si non serviteur)
     if(!p.servant){
       if(Game.muscariaTrap1 && Game.muscariaTrap1.active && eTile[0]===Game.muscariaTrap1.x && eTile[1]===Game.muscariaTrap1.y){
         const rt=randomOpenTile(); p.x=rt[0]+0.5; p.y=rt[1]+0.5; p.path=[]; p.lastSeen=null; p.chaosTarget=null;
@@ -750,7 +824,7 @@ function update(dt){
       }
     }
 
-    // Serviteur : collecte pour son propriétaire
+    // Serviteur : collecte
     if(p.servant){
       p.servantTime--; if(p.servantTime<=0){ p.servant=false; if(p.servantOwner===1 && Game.servant1===p) Game.servant1=null; if(p.servantOwner===2 && Game.servant2===p) Game.servant2=null; }
       const target=findNearestPellet([Math.floor(p.x),Math.floor(p.y)]);
@@ -956,7 +1030,7 @@ function playerHit(pl, hitter){
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
 
-  // Bouclier du Cèpe : ignore 1 coup + knockback ciblé
+  // Bouclier du Cèpe : ignore 1 coup + knockback ciblé (avec domino)
   if(pl.shield){
     pl.shield=false;
     (pl.pid===1?UI.power1:UI.power2).textContent='—';
@@ -964,13 +1038,15 @@ function playerHit(pl, hitter){
 
     if(hitter){
       const target = computeKnockbackTarget(hitter, pl);
+      const dir = [ (target.x - hitter.x), (target.y - hitter.y) ];
+      const len = Math.hypot(dir[0],dir[1])||1;
       hitter.kbActive = true;
       hitter.kbTx = target.x;
       hitter.kbTy = target.y;
       hitter.kbSpeed = pl.speed * 2;   // 2× la vitesse du champignon
+      hitter.kbDir = [dir[0]/len, dir[1]/len];
       hitter.scared = Math.max(hitter.scared, 90);
-      hitter.path = [];
-      hitter.lastSeen = null;
+      hitter.path = []; hitter.lastSeen = null;
     } else {
       // fallback de sécurité
       repelEnemiesAround(pl, 2.2, 0.9);
@@ -1000,7 +1076,7 @@ function playerHit(pl, hitter){
 
   // Réapparition immédiate + flash 5s
   const s=findOpenTile(); pl.x=s.x+0.5; pl.y=s.y+0.5; pl.dir=[0,0];
-  pl.respawnFlash = 5*60; // 5 secondes
+  pl.respawnFlash = 5*60; // 5 s
   pl.invisible=false; pl.phase=false; pl.spinning=false; pl.frozenTimer=0;
 }
 
@@ -1094,14 +1170,21 @@ function draw(){
   });
 
   Game.parasites.forEach(p=>{
-    drawParasite(CTX,p.x*TILE,p.y*TILE,TILE*0.9,p.kind,p.servant,(p.blind>0));
+    drawParasite(CTX,p.x*TILE,p.y*TILE,TILE*0.9,p.kind,p.servant,(p.blind>0),(p.confusedTimer>0));
     if(p.scared>0){ CTX.globalAlpha=0.4; CTX.fillStyle='#fff'; CTX.fillRect(p.x*TILE-10,p.y*TILE-10,20,20); CTX.globalAlpha=1; }
+    if(p.kbActive){
+      // petite traînée
+      CTX.save(); CTX.globalAlpha=0.15;
+      CTX.fillStyle='#ffe6aa'; CTX.beginPath();
+      CTX.arc(p.x*TILE, p.y*TILE, 8, 0, Math.PI*2); CTX.fill();
+      CTX.restore();
+    }
   });
 
   if(Game.p1) drawPlayerEntity(Game.p1);
   if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
 
-  // Indication de départ : “Appuyez sur P…”
+  // Indication de départ
   if(Game.showStartHint>0){
     Game.showStartHint--;
     CTX.save();
@@ -1113,7 +1196,7 @@ function draw(){
     CTX.restore();
   }
 
-  // État pause / compte à rebours (uniquement au début / via P)
+  // État pause / compte à rebours
   if(Game.paused && Game.countdown===0){
     CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H);
     CTX.globalAlpha=1; CTX.fillStyle='#fff'; CTX.font='bold 42px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
@@ -1177,7 +1260,7 @@ function drawPlayerEntity(pl){
     CTX.beginPath(); CTX.arc(x,y,r,0,Math.PI*2);
     CTX.lineWidth=2; CTX.strokeStyle='rgba(255,255,255,0.55)'; CTX.stroke();
   }
-  // FLASH réapparition (clignote 5 s)
+  // FLASH réapparition
   if(pl.respawnFlash>0){
     const t=performance.now()/120;
     const blink = (Math.floor(t)%2===0) ? 0.85 : 0.35;
@@ -1185,14 +1268,14 @@ function drawPlayerEntity(pl){
     CTX.save();
     CTX.globalAlpha = blink;
     CTX.beginPath(); CTX.arc(x,y,r,0,Math.PI*2);
-    CTX.lineWidth=4; CTX.strokeStyle='rgba(255,255,180,0.95)';
+    CTX.lineWidth=4; CTX.strokeStyle = 'rgba(255,255,180,0.95)';
     CTX.stroke();
     CTX.restore();
   }
 
-  // mini feedback visuel quand le Cèpe déclenche son bouclier (onde courte)
+  // onde courte lors du bouclier Cèpe
   if(pl.species.id==='edulis' && pl.hitGrace>0){
-    const t = (45 - pl.hitGrace) / 45;  // 0 → 1
+    const t = (45 - pl.hitGrace) / 45;
     const r = 12 + t * 14;
     CTX.save();
     CTX.globalAlpha = 0.35*(1 - t);
