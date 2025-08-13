@@ -545,6 +545,7 @@ function makePlayer(tx,ty,pid,species){
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, hunterWindow:0, trumpetTrapImmune:false,
     respawnFlash: 0 // frames restantes pour clignotement réapparition
+    hitGrace: 0
   };
 }
 
@@ -558,6 +559,31 @@ function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, 
 const BonusKinds=['life','speed','power','score','freeze'];
 function pickBonusKind(seed){ return BonusKinds[seed%BonusKinds.length]; }
 function spawnSporeCloud(x,y){ Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'}); Game.parasites.forEach(p=>{ p.scared=200; }); }
+
+// Repousse les parasites autour du joueur (rayon en cases ; force en cases)
+function repelEnemiesAround(pl, radiusTiles, forceTiles){
+  const radius = radiusTiles;                 // en cases
+  const force  = forceTiles;                  // déplacement instantané en cases
+  const px = pl.x, py = pl.y;
+
+  Game.parasites.forEach(p=>{
+    const dx = p.x - px, dy = p.y - py;
+    const dist = Math.hypot(dx,dy);
+    if(dist > 0 && dist <= radius){
+      // vecteur normalisé
+      const nx = dx / dist, ny = dy / dist;
+
+      // push-back
+      p.x += nx * force;
+      p.y += ny * force;
+
+      // petit “stun/peur” + reset de chemin pour éviter le re-hit immédiat
+      p.scared = Math.max(p.scared, 120);
+      p.path = [];
+      p.lastSeen = null;
+    }
+  });
+}
 
 /* Couches graphiques */
 function buildLayers(){
@@ -886,7 +912,16 @@ function parasiteHitPlayers(p){
 /* Mort / Réapparition SANS pause + flash 5s */
 function playerHit(pl){
   if(pl.invisible) return;
-  if(pl.shield){ pl.shield=false; (pl.pid===1?UI.power1:UI.power2).textContent='—'; return; }
+  if(pl.hitGrace>0) return;   // ⬅️ NE PAS toucher si on est dans la fenêtre de grâce
+  if(pl.shield){
+  pl.shield=false;
+  (pl.pid===1?UI.power1:UI.power2).textContent='—';
+  pl.hitGrace = 45;          // ~0,75s à 60 FPS
+
+  repelEnemiesAround(pl, 2.2, 0.9); // ⬅️ on repousse (rayon=2,2 cases ; force ≈0,9 case)
+  sfxPower(); // petit feedback sonore
+
+  return; }
   sfxHit();
   if(pl.pid===1){ Game.lives1--; UI.lives1.textContent=Game.lives1; }
   else { Game.lives2--; UI.lives2.textContent=Game.lives2; }
@@ -916,6 +951,7 @@ function updatePlayer(pl, dt){
   if(!pl) return;
   pl.anim+=dt;
   if(pl.respawnFlash>0) pl.respawnFlash--;
+  if(pl.hitGrace>0) pl.hitGrace--;
   if(pl.hunterWindow>0) pl.hunterWindow--;
   if(pl.powerTimer>0){
     pl.powerTimer--;
@@ -1095,6 +1131,21 @@ function drawPlayerEntity(pl){
     CTX.stroke();
     CTX.restore();
   }
+
+  //mini feedback visuel quand le Cèpe déclenche son bouclier
+  if(pl.species.id==='edulis' && pl.hitGrace>0){
+  const x=pl.x*TILE, y=pl.y*TILE;
+  const t = (45 - pl.hitGrace) / 45;  // 0 → 1
+  const r = 12 + t * 14;
+  CTX.save();
+  CTX.globalAlpha = 0.35*(1 - t);
+  CTX.beginPath();
+  CTX.arc(x, y, r, 0, Math.PI*2);
+  CTX.lineWidth = 3;
+  CTX.strokeStyle = 'rgba(255,230,160,0.9)';
+  CTX.stroke();
+  CTX.restore();
+}
 }
 
 /* Fin de match */
