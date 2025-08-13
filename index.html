@@ -77,14 +77,12 @@ const MATCH_LEVELS_DUO=4;
 
 /* ============ Assets (sprites PNG fournis) ============ */
 /* Jeu = sprite en jeu ; UI = sprite du menu (souvent version "bordered" et plus lisible) */
-/* TODO: Mets ci-dessous le BON fichier pour chaque espèce.
-   Tu as confirmé que le CÈPE (edulis) = champignon_4.png. Les autres sont à corriger si besoin. */
 const SPRITES_BY_SPECIES = {
-  cornucopioides: { game: 'champignon_6_bordered.png',          ui: 'champignon_6_bordered.png' },          // Trompette de la mort
-  muscaria:       { game: 'champignon_3.png', ui: 'champignon_3.png' }, // Amanite tue-mouches
-  cibarius:       { game: 'champignon_1.png', ui: 'champignon_1.png' }, // Girolle
-  edulis:         { game: 'champignon_4.png',          ui: 'champignon_4.png' },          // CÈPE
-  morchella:      { game: 'champignon_5_bordered.png',          ui: 'champignon_5_bordered.png' },          // Morille
+  cornucopioides: { game: 'champignon_6_bordered.png', ui: 'champignon_6_bordered.png' }, // Trompette de la mort (à ajuster si besoin)
+  muscaria:       { game: 'champignon_3.png',          ui: 'champignon_3.png' },          // Amanite tue-mouches
+  cibarius:       { game: 'champignon_1.png',          ui: 'champignon_1.png' },          // Girolle
+  edulis:         { game: 'champignon_4.png',          ui: 'champignon_4.png' },          // CÈPE (confirmé)
+  morchella:      { game: 'champignon_5_bordered.png', ui: 'champignon_5_bordered.png' }, // Morille
   phalloides:     { game: 'champignon_2.png',          ui: 'champignon_2.png' },          // Amanite phalloïde
 };
 
@@ -224,7 +222,7 @@ const Species=[
     draw:drawChanterelle,
     use:(me)=>{ me.powerTimer=300; me.hunterWindow=300; UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?'; }
   },
-  { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse les ennemis.', color:'#7a4f2a',
+  { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse l’ennemi.', color:'#7a4f2a',
     draw:drawCep,
     use:(me)=>{ me.powerTimer=360; me.shield=true; }
   },
@@ -246,15 +244,13 @@ function buildChoiceCard(sp, forPid){
 
   const div=document.createElement('div');
   div.className='choice'+(disabled?' disabled':'');
-div.style.cssText = 'background:#0e0b13;border:1px solid #ffffff1f;border-radius:12px;padding:14px;cursor:pointer;display:flex;gap:12px;align-items:center;';
+  div.style.cssText = 'background:#0e0b13;border:1px solid #ffffff1f;border-radius:12px;padding:14px;cursor:pointer;display:flex;gap:12px;align-items:center;';
   
-  // Icône du menu : plus grande et on force l’usage du sprite "UI" (icon=true)
-const icon = document.createElement('canvas');
-icon.width = 84;  // tu peux mettre 72 si tu préfères
-icon.height = 84;
-const ict = icon.getContext('2d');
-// centre + taille généreuse pour que l’image UI (bordered) soit bien visible
-sp.draw(ict, icon.width/2, icon.height/2, 76, true, false);
+// Icône du menu via PNG UI directement
+const icon = document.createElement('img');
+icon.src = getSpritePath(sp.id, true); // prend SPRITES_BY_SPECIES[sp.id].ui
+icon.alt = sp.name;
+icon.style.cssText = 'width:84px;height:84px;object-fit:contain;image-rendering:crisp-edges;flex:0 0 auto;';
 
   const right=document.createElement('div'); right.style.display='grid'; right.style.gap='4px';
   const name=document.createElement('div'); name.style.fontWeight='800'; name.textContent=sp.name;
@@ -517,7 +513,9 @@ function loadLevel(i,first=false){
       state:'wander',lastSeen:null,path:[],
       chaos:false, chaosMode:null, chaosTick:0, chaosTarget:null,
       seedOnce:false, seedCd:0, chaosAte:false,
-      servant:false, servantTime:0, servantOwner:0
+      servant:false, servantTime:0, servantOwner:0,
+      // knockback
+      kbActive:false, kbTx:0, kbTy:0, kbSpeed:0
     });
   }
 
@@ -552,7 +550,14 @@ function makePlayer(tx,ty,pid,species){
 function findOpenTile(){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; for(let t=0;t<4000;t++){ const x=(Math.random()*cols)|0, y=(Math.random()*rows)|0; if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } return {x:1,y:1}; }
 function findOpenNear(cx,cy){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; const maxR=Math.max(cols,rows); for(let r=0;r<maxR;r++){ for(let dy=-r;dy<=r;dy++){ for(let dx=-r;dx<=r;dx++){ const x=cx+dx,y=cy+dy; if(x>=1&&y>=1&&x<cols-1&&y<rows-1){ if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } } } } return findOpenTile(); }
 function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, LEVEL_INDEX*0.012); const speed=base*SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
-  Game.parasites.push({x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind,scared:0,blind:0,state:'wander',lastSeen:null,path:[],chaos:false,chaosMode:null,chaosTarget:null, seedOnce:false, seedCd:0, chaosAte:false, servant:false, servantTime:0, servantOwner:0});
+  Game.parasites.push({
+    x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind,
+    scared:0,blind:0,state:'wander',lastSeen:null,path:[],
+    chaos:false,chaosMode:null,chaosTarget:null,seedOnce:false,seedCd:0,chaosAte:false,
+    servant:false,servantTime:0,servantOwner:0,
+    // knockback
+    kbActive:false, kbTx:0, kbTy:0, kbSpeed:0
+  });
 }
 
 /* Bonus & spores */
@@ -562,27 +567,44 @@ function spawnSporeCloud(x,y){ Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:2
 
 // Repousse les parasites autour du joueur (rayon en cases ; force en cases)
 function repelEnemiesAround(pl, radiusTiles, forceTiles){
-  const radius = radiusTiles;                 // en cases
-  const force  = forceTiles;                  // déplacement instantané en cases
+  const radius = radiusTiles;
+  const force  = forceTiles;
   const px = pl.x, py = pl.y;
 
   Game.parasites.forEach(p=>{
     const dx = p.x - px, dy = p.y - py;
     const dist = Math.hypot(dx,dy);
     if(dist > 0 && dist <= radius){
-      // vecteur normalisé
       const nx = dx / dist, ny = dy / dist;
-
-      // push-back
       p.x += nx * force;
       p.y += ny * force;
-
-      // petit “stun/peur” + reset de chemin pour éviter le re-hit immédiat
       p.scared = Math.max(p.scared, 120);
       p.path = [];
       p.lastSeen = null;
     }
   });
+}
+
+/* ---------- Knockback ciblé (Cèpe) ---------- */
+// Calcule le point (en coords "cases") jusqu'au mur dans la direction depuis pl -> p
+function computeKnockbackTarget(p, pl){
+  let dx = p.x - pl.x, dy = p.y - pl.y;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+
+  let lastX = p.x, lastY = p.y;
+  const step = 0.2;      // pas en cases
+  const maxSteps = 200;  // sécurité
+  for(let i=0;i<maxSteps;i++){
+    const nx = lastX + dx * step;
+    const ny = lastY + dy * step;
+    const gx = Math.floor(nx), gy = Math.floor(ny);
+    if(!isWalkable(gx, gy)){
+      break; // le prochain pas tape un mur -> on s'arrête juste avant
+    }
+    lastX = nx; lastY = ny;
+  }
+  return { x:lastX, y:lastY };
 }
 
 /* Couches graphiques */
@@ -695,6 +717,25 @@ function update(dt){
 
   // Parasites
   Game.parasites.forEach(p=>{
+    // ---------- Knockback prioritaire ----------
+    if(p.kbActive){
+      const dx = p.kbTx - p.x;
+      const dy = p.kbTy - p.y;
+      const dist = Math.hypot(dx, dy);
+      const spd = (p.kbSpeed || 0.22) * dt; // 0.22 ~ 2*0.11 si pas défini
+      if(dist <= 0.05){
+        p.x = p.kbTx; p.y = p.kbTy;
+        p.kbActive = false;
+      } else {
+        const nx = dx / (dist || 1), ny = dy / (dist || 1);
+        p.x += nx * spd;
+        p.y += ny * spd;
+        p.dir = [Math.sign(nx), Math.sign(ny)];
+      }
+      parasiteHitPlayers(p); // peut heurter l'autre joueur pendant la trajectoire
+      return; // saute l'IA normale tant que knockback actif
+    }
+
     if(p.scared>0) p.scared--;
     if(p.blind>0) p.blind--;
     const eTile=[Math.max(0,Math.floor(p.x)), Math.max(0,Math.floor(p.y))];
@@ -726,6 +767,7 @@ function update(dt){
           }
         }
       }
+      parasiteHitPlayers(p);
       return;
     }
 
@@ -902,26 +944,42 @@ function update(dt){
 
 function parasiteHitPlayers(p){
   const hitP1 = distance(p.x,p.y, Game.p1.x,Game.p1.y) < 0.6;
-  if(hitP1) playerHit(Game.p1);
+  if(hitP1) playerHit(Game.p1, p); // on passe le parasite percuteur
   if(Game.mode==='duo' && Game.p2){
     const hitP2 = distance(p.x,p.y, Game.p2.x,Game.p2.y) < 0.6;
-    if(hitP2) playerHit(Game.p2);
+    if(hitP2) playerHit(Game.p2, p);
   }
 }
 
 /* Mort / Réapparition SANS pause + flash 5s */
-function playerHit(pl){
+function playerHit(pl, hitter){
   if(pl.invisible) return;
-  if(pl.hitGrace>0) return;   // ⬅️ NE PAS toucher si on est dans la fenêtre de grâce
+  if(pl.hitGrace>0) return;
+
+  // Bouclier du Cèpe : ignore 1 coup + knockback ciblé
   if(pl.shield){
-  pl.shield=false;
-  (pl.pid===1?UI.power1:UI.power2).textContent='—';
-  pl.hitGrace = 45;          // ~0,75s à 60 FPS
+    pl.shield=false;
+    (pl.pid===1?UI.power1:UI.power2).textContent='—';
+    pl.hitGrace = 45;  // ~0,75s invulnérabilité
 
-  repelEnemiesAround(pl, 2.2, 0.9); // ⬅️ on repousse (rayon=2,2 cases ; force ≈0,9 case)
-  sfxPower(); // petit feedback sonore
+    if(hitter){
+      const target = computeKnockbackTarget(hitter, pl);
+      hitter.kbActive = true;
+      hitter.kbTx = target.x;
+      hitter.kbTy = target.y;
+      hitter.kbSpeed = pl.speed * 2;   // 2× la vitesse du champignon
+      hitter.scared = Math.max(hitter.scared, 90);
+      hitter.path = [];
+      hitter.lastSeen = null;
+    } else {
+      // fallback de sécurité
+      repelEnemiesAround(pl, 2.2, 0.9);
+    }
 
-  return; }
+    sfxPower();
+    return;
+  }
+
   sfxHit();
   if(pl.pid===1){ Game.lives1--; UI.lives1.textContent=Game.lives1; }
   else { Game.lives2--; UI.lives2.textContent=Game.lives2; }
@@ -1132,7 +1190,7 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 
-  //mini feedback visuel quand le Cèpe déclenche son bouclier
+  // mini feedback visuel quand le Cèpe déclenche son bouclier (onde courte)
   if(pl.species.id==='edulis' && pl.hitGrace>0){
     const t = (45 - pl.hitGrace) / 45;  // 0 → 1
     const r = 12 + t * 14;
@@ -1144,7 +1202,7 @@ function drawPlayerEntity(pl){
     CTX.strokeStyle = 'rgba(255,230,160,0.9)';
     CTX.stroke();
     CTX.restore();
-}
+  }
 }
 
 /* Fin de match */
