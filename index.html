@@ -544,7 +544,7 @@ function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, hunterWindow:0, trumpetTrapImmune:false,
-    respawnFlash: 0 // frames restantes pour clignotement réapparition
+    respawnFlash: 0, // frames restantes pour clignotement réapparition
     hitGrace: 0
   };
 }
@@ -1134,17 +1134,16 @@ function drawPlayerEntity(pl){
 
   //mini feedback visuel quand le Cèpe déclenche son bouclier
   if(pl.species.id==='edulis' && pl.hitGrace>0){
-  const x=pl.x*TILE, y=pl.y*TILE;
-  const t = (45 - pl.hitGrace) / 45;  // 0 → 1
-  const r = 12 + t * 14;
-  CTX.save();
-  CTX.globalAlpha = 0.35*(1 - t);
-  CTX.beginPath();
-  CTX.arc(x, y, r, 0, Math.PI*2);
-  CTX.lineWidth = 3;
-  CTX.strokeStyle = 'rgba(255,230,160,0.9)';
-  CTX.stroke();
-  CTX.restore();
+    const t = (45 - pl.hitGrace) / 45;  // 0 → 1
+    const r = 12 + t * 14;
+    CTX.save();
+    CTX.globalAlpha = 0.35*(1 - t);
+    CTX.beginPath();
+    CTX.arc(x, y, r, 0, Math.PI*2);
+    CTX.lineWidth = 3;
+    CTX.strokeStyle = 'rgba(255,230,160,0.9)';
+    CTX.stroke();
+    CTX.restore();
 }
 }
 
