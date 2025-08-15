@@ -657,7 +657,7 @@ function drawWallCell(ctx,x,y){
   ctx.fillStyle=BIOME.moss; ctx.fillRect(px,py,TILE,4); ctx.fillRect(px,py,4,TILE);
   ctx.fillStyle='#00000033'; ctx.fillRect(px,py+TILE-4,TILE,4); ctx.fillRect(px+TILE-4,py,4,TILE);
 
-// --- IMAGE PNG au centre ---
+  // --- IMAGE PNG au centre ---
   const path = pickTreeSpriteAt(x,y);
   const img  = loadImg(path);
   const S  = Math.round(TILE * 0.62);
@@ -667,11 +667,12 @@ function drawWallCell(ctx,x,y){
   if (img.complete) {
     ctx.drawImage(img, ox, oy, S, S);
   } else {
-    // Important : comme la couche murs ne sera plus redessinée ensuite,
-    // on dessine l’icône dès que l’image finit de charger.
-    img.onload = () => ctx.drawImage(img, ox, oy, S, S);
+    // IMPORTANT: ne pas écraser d’autres handlers
+    const drawOnce = () => ctx.drawImage(img, ox, oy, S, S);
+    img.addEventListener('load', drawOnce, { once:true });
   }
 }
+
 
 function drawPellet(ctx,x,y){ const px=x*TILE+TILE/2, py=y*TILE+TILE/2; ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(px,py,3,0,6.28); ctx.fill(); }
 
