@@ -657,14 +657,19 @@ function drawWallCell(ctx,x,y){
   ctx.fillStyle=BIOME.moss; ctx.fillRect(px,py,TILE,4); ctx.fillRect(px,py,4,TILE);
   ctx.fillStyle='#00000033'; ctx.fillRect(px,py+TILE-4,TILE,4); ctx.fillRect(px+TILE-4,py,4,TILE);
 
-  // --- IMAGE PNG au centre (remplace l'emoji) ---
+// --- IMAGE PNG au centre ---
   const path = pickTreeSpriteAt(x,y);
   const img  = loadImg(path);
-  if (img.complete){
-    const S = Math.round(TILE * 0.62);         // taille de l’icône (≈ 17 px si TILE=28)
-    const ox = px + ((TILE - S) / 2) | 0;      // centrage
-    const oy = py + ((TILE - S) / 2) | 0;
+  const S  = Math.round(TILE * 0.62);
+  const ox = (px + (TILE - S) / 2) | 0;
+  const oy = (py + (TILE - S) / 2) | 0;
+
+  if (img.complete) {
     ctx.drawImage(img, ox, oy, S, S);
+  } else {
+    // Important : comme la couche murs ne sera plus redessinée ensuite,
+    // on dessine l’icône dès que l’image finit de charger.
+    img.onload = () => ctx.drawImage(img, ox, oy, S, S);
   }
 }
 
