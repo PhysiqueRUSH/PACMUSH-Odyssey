@@ -239,7 +239,16 @@ const Species=[
   },
   { id:'cibarius', name:'Girolle', power:'Serviteur (15s)', desc:'Convertit 1 parasite en allié collecteur.', color:'#e6a100',
     draw:drawChanterelle,
-    use:(me)=>{ me.powerTimer=300; me.hunterWindow=300; UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?'; }
+    use:(me)=>{
+  me.powerTimer=300;        // ~5s
+  me.hunterWindow=300;      // fenêtre de capture
+  UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?';
+
+  // Panique globale : tous fuient la Girolle pendant la fenêtre
+  Game.girollePanic.active = true;
+  Game.girollePanic.ownerPid = me.pid;
+  Game.parasites.forEach(p => { p.fleeGirolle = me.hunterWindow; });
+}
   },
   { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse l’ennemi en chaîne.', color:'#7a4f2a',
     draw:drawCep,
@@ -485,6 +494,7 @@ const Game={
   servant1:null, servant2:null,
   blindGlobal:0,
   levelsToPlay: MATCH_LEVELS_SOLO,
+  girollePanic:{active:false, ownerPid:0},
   showStartHint: 0,
   themeLayer:null, wallsLayer:null, pelletsLayer:null
 };
@@ -534,6 +544,7 @@ function loadLevel(i,first=false){
       // knockback
       kbActive:false, kbTx:0, kbTy:0, kbSpeed:0, kbDir:[0,0],
       // confusion (après impact mur)
+      fleeGirolle:0,
       confusedTimer:0
     });
   }
@@ -574,6 +585,7 @@ function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, 
     chaos:false,chaosMode:null,chaosTarget:null,seedOnce:false,seedCd:0,chaosAte:false,
     servant:false,servantTime:0,servantOwner:0,
     kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
+    fleeGirolle:0,
     confusedTimer:0
   });
 }
@@ -833,6 +845,32 @@ function update(dt){
       }
     }
 
+    // Fuite spécifique quand la Girolle a activé son pouvoir
+if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
+  p.fleeGirolle--;
+
+  const owner = (Game.girollePanic.ownerPid === 1) ? Game.p1 : Game.p2;
+  if (owner) {
+    const eTile = [Math.floor(p.x), Math.floor(p.y)];
+    let best = eTile, bestScore = -1;
+    const ns = neighbors(eTile[0], eTile[1]);
+    for (let i=0;i<ns.length;i++){
+      const nx = ns[i][0], ny = ns[i][1];
+      const dist = Math.hypot((nx+0.5)-owner.x, (ny+0.5)-owner.y);
+      if (dist > bestScore) { bestScore = dist; best = ns[i]; }
+    }
+    const tx = best[0] + 0.5, ty = best[1] + 0.5;
+    const dx = tx - p.x, dy = ty - p.y, len = Math.hypot(dx,dy)||1;
+    const spd = p.speed * dt * 0.95;
+    p.x += (dx/len)*spd; p.y += (dy/len)*spd;
+    p.dir = [Math.sign(dx), Math.sign(dy)];
+  }
+
+  parasiteHitPlayers(p);
+  return; // on court-circuite les autres IA (serviteur/aveugle/chaos/normal)
+}
+
+    
     // Serviteur : collecte
     if(p.servant){
       p.servantTime--; if(p.servantTime<=0){ p.servant=false; if(p.servantOwner===1 && Game.servant1===p) Game.servant1=null; if(p.servantOwner===2 && Game.servant2===p) Game.servant2=null; }
@@ -1034,8 +1072,24 @@ function parasiteHitPlayers(p){
   }
 }
 
-/* Mort / Réapparition SANS pause + flash 5s */
+
 function playerHit(pl, hitter){
+  // Girolle : si fenêtre active, convertir le parasite frappeur sans dégâts ni TP
+  if (pl.species.id === 'cibarius' && pl.hunterWindow > 0) {
+    if (hitter && !hitter.servant) {
+      releaseServant(pl.pid);
+      convertToServant(hitter, pl.pid);
+      pl.hunterWindow = 0;
+
+      // Fin immédiate de la panique : les autres re-poursuivent
+      Game.girollePanic.active = false;
+      Game.parasites.forEach(q => { q.fleeGirolle = 0; });
+
+      (pl.pid===1?UI.power1:UI.power2).textContent='Serviteur ✓';
+      sfxPower();
+    }
+    return; // pas de perte de vie, pas de respawn
+  }
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
 
@@ -1147,18 +1201,6 @@ function updatePlayer(pl, dt){
       const trap=Game.traps[idx]; Game.traps.splice(idx,1); Game.grid[ntY][ntX]=0;
       if(!(pl.species.id==='cornucopioides' && pl.trumpetTrapImmune)){
         if(trap.t===0){ spawnEnemy(); } else { pl.frozenTimer=5*60; }
-      }
-    }
-  }
-
-  // Girolle : conversion serviteur si collision pendant la fenêtre
-  if(pl.species.id==='cibarius' && pl.hunterWindow>0){
-    for(const p of Game.parasites){
-      if(!p.servant && distance(p.x,p.y,pl.x,pl.y)<0.6){
-        releaseServant(pl.pid);
-        convertToServant(p, pl.pid);
-        pl.hunterWindow=0;
-        break;
       }
     }
   }
