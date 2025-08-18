@@ -255,7 +255,7 @@ const Species=[
   { id:'cibarius', name:'Girolle', power:'Serviteur (15s)', desc:'Convertit 1 parasite en allié collecteur.', color:'#e6a100',
     draw:drawChanterelle,
     use:(me)=>{
-  me.powerTimer=15s;        // ~15s
+  me.powerTimer=900;        // ~15s
   me.hunterWindow=600;      // fenêtre de capture
   UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?';
 
