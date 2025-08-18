@@ -1074,22 +1074,27 @@ function parasiteHitPlayers(p){
 
 
 function playerHit(pl, hitter){
-  // Girolle : si fenêtre active, convertir le parasite frappeur sans dégâts ni TP
+  // --- GIROLLE (cibarius) ---
+  // Pendant la fenêtre active :
+  //  - si on touche un parasite non-serviteur => on le convertit et on stoppe la panique
+  //  - si le parasite est déjà serviteur (conversion faite ailleurs la même frame) => on ignore tout
+  //  - dans tous les cas on NE perd pas de vie et on NE TP pas
   if (pl.species.id === 'cibarius' && pl.hunterWindow > 0) {
     if (hitter && !hitter.servant) {
       releaseServant(pl.pid);
       convertToServant(hitter, pl.pid);
       pl.hunterWindow = 0;
 
-      // Fin immédiate de la panique : les autres re-poursuivent
+      // Fin immédiate de la panique seulement s'il y a conversion
       Game.girollePanic.active = false;
       Game.parasites.forEach(q => { q.fleeGirolle = 0; });
 
       (pl.pid===1?UI.power1:UI.power2).textContent='Serviteur ✓';
       sfxPower();
     }
-    return; // pas de perte de vie, pas de respawn
+    return; // <-- court-circuite toute perte de vie/respawn
   }
+
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
 
