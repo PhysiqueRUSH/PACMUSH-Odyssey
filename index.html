@@ -149,11 +149,13 @@ function triggerPower(pid){
   if(Game.countdown>0) return;
   const pl = pid===1?Game.p1:Game.p2;
   if(!pl) return;
-  if(pl.powerTimer<=0){
-    pl.species.use(pl);
-    if(pl.nextPowerExtend && pl.nextPowerExtend>0){ pl.powerTimer+=pl.nextPowerExtend; pl.nextPowerExtend=0; }
-    (pid===1?UI.power1:UI.power2).textContent=pl.species.power; sfxPower();
-  }
+ if (pl.powerTimer<=0) {
+  // phalloides: bloque si cooldown actif
+  if (pl.species.id==='phalloides' && pl.phaseCooldown>0) return;
+  pl.species.use(pl);
+  if(pl.nextPowerExtend && pl.nextPowerExtend>0){ pl.powerTimer+=pl.nextPowerExtend; pl.nextPowerExtend=0; }
+  (pid===1?UI.power1:UI.power2).textContent=pl.species.power; sfxPower();
+}
 }
 
 /* ============ Utils ============ */
@@ -231,8 +233,21 @@ function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind,isConfused){
 const Species=[
   { id:'cornucopioides', name:"Trompette de la mort", power:"Voile total (10s)", desc:"Invisible, parasites aveugles & lents, immunisée aux pièges 10s.", color:'#3d3630',
     draw:(c,x,y,s,icon,ghost)=>drawTrumpet(c,x,y,s,icon,ghost),
-    use:(me)=>{ me.powerTimer=600; me.invisible=true; me.trumpetTrapImmune=true; Game.parasites.forEach(p=>{ p.blind=Math.max(p.blind,600); }); }
-  },
+    use:(me)=>{
+  me.powerTimer = 600;           // ~10s
+  me.invisible  = true;
+  me.trumpetTrapImmune = true;
+
+  const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
+  const cx = me.x, cy = me.y;
+
+  Game.parasites.forEach(p=>{
+    const dx = p.x - cx, dy = p.y - cy;
+    if (Math.hypot(dx,dy) <= radTiles) {
+      p.blind = Math.max(p.blind, 600); // aveugle 10s (lents + aléatoires)
+    }
+  });
+},
   { id:'muscaria', name:'Amanite tue-mouches', power:'Piège mycotique', desc:"Pose un piège qui téléporte les parasites.", color:'#c81d1d',
     draw:drawAmanita,
     use:(me)=>{ const tx=Math.floor(me.x), ty=Math.floor(me.y); if(me.pid===1) Game.muscariaTrap1={x:tx,y:ty,active:true}; else Game.muscariaTrap2={x:tx,y:ty,active:true}; me.powerTimer=120; }
@@ -240,7 +255,7 @@ const Species=[
   { id:'cibarius', name:'Girolle', power:'Serviteur (15s)', desc:'Convertit 1 parasite en allié collecteur.', color:'#e6a100',
     draw:drawChanterelle,
     use:(me)=>{
-  me.powerTimer=300;        // ~5s
+  me.powerTimer=15s;        // ~15s
   me.hunterWindow=300;      // fenêtre de capture
   UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?';
 
@@ -256,11 +271,31 @@ const Species=[
   },
   { id:'morchella', name:'Morille', power:'Essaim de spores', desc:'Chaos global, parasites désorientés.', color:'#6a4f2f',
     draw:drawMorel,
-    use:(me)=>{ me.powerTimer=300; spawnSporeCloud(me.x,me.y); Game.parasites.forEach(p=>{ p.scared=300; p.chaos=true; p.chaosMode=null; p.chaosTick=0; p.chaosTarget=null; p.seedOnce=false; p.seedCd=0; p.chaosAte=false; }); }
-  },
+    use:(me)=>{
+  me.powerTimer = 600; // 10s d'aura
+  const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
+  const cx = me.x, cy = me.y;
+
+  Game.parasites.forEach(p=>{
+    if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
+      p.morilleChaos = 600;     // durée 10s
+      p.morilleOwner = me.pid;  // propriétaire pour le scoring/target
+      p.morilleNextSwitch = 0;  // switch immédiat au tick suivant
+      p.morilleMode = null;
+    }
+  });
+
+  // (Option visuelle)
+spawnSporeCloud(me.x, me.y, Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS))));
+},
   { id:'phalloides', name:'Amanite phalloïde', power:'Phase mycélienne', desc:'Traverse les murs fins brièvement.', color:'#7a8b4b',
     draw:drawPhalloides,
-    use:(me)=>{ me.powerTimer=240; me.phase=true; }
+    use:(me)=>{
+  if (me.phaseCooldown>0) return; // sécurité
+  me.phase = true;
+  me.phaseInsideWall = false;
+  me.powerTimer = 99999; // on coupera nous-mêmes après 1 mur
+}
   },
 ];
 let Selected1=Species[0], Selected2=Species[1];
@@ -545,6 +580,7 @@ function loadLevel(i,first=false){
       kbActive:false, kbTx:0, kbTy:0, kbSpeed:0, kbDir:[0,0],
       // confusion (après impact mur)
       fleeGirolle:0,
+      morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null,
       confusedTimer:0
     });
   }
@@ -571,7 +607,7 @@ function loadLevel(i,first=false){
 function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
-    frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, hunterWindow:0, trumpetTrapImmune:false,
+    frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
     respawnFlash: 0, hitGrace: 0
   };
 }
@@ -586,6 +622,7 @@ function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, 
     servant:false,servantTime:0,servantOwner:0,
     kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
     fleeGirolle:0,
+    morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null,
     confusedTimer:0
   });
 }
@@ -593,7 +630,15 @@ function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, 
 /* Bonus & spores */
 const BonusKinds=['life','speed','power','score','freeze'];
 function pickBonusKind(seed){ return BonusKinds[seed%BonusKinds.length]; }
-function spawnSporeCloud(x,y){ Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'}); Game.parasites.forEach(p=>{ p.scared=200; }); }
+function spawnSporeCloud(x,y,radTiles=null){
+  Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'});
+  if (radTiles!=null) {
+    Game.parasites.forEach(p=>{
+      if (Math.hypot(p.x-x, p.y-y) <= radTiles) p.scared = 200;
+    });
+  }
+}
+
 
 /* ---------- Repousse radial (fallback) ---------- */
 function repelEnemiesAround(pl, radiusTiles, forceTiles){
@@ -870,6 +915,88 @@ if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
   return; // on court-circuite les autres IA (serviteur/aveugle/chaos/normal)
 }
 
+// --- CHAOS Morille (local et cadencé) ---
+if (p.morilleChaos > 0) {
+  p.morilleChaos--;
+  p.morilleNextSwitch = (p.morilleNextSwitch||0) - 1;
+  if (p.morilleNextSwitch <= 0 || !p.morilleMode) {
+    // toutes les 5s (300 frames)
+    p.morilleNextSwitch = 300;
+    const modes = ['freeze','bounce','huntParasite','collect','rushPlayer'];
+    p.morilleMode = modes[(Math.random()*modes.length)|0];
+    p.chaosTarget = null;
+  }
+
+  const eTile=[Math.floor(p.x),Math.floor(p.y)];
+  const base = p.speed*dt;
+  const stepTo=(gx,gy,spd)=>{
+    const tx=gx+0.5, ty=gy+0.5; const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+    p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
+    return (Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05);
+  };
+
+  if (p.morilleMode==='freeze') {
+    // immobile
+  }
+  else if (p.morilleMode==='bounce') {
+    // petits aller-retours
+    if(!p.chaosTarget){
+      const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
+      p.chaosTarget = opts.length ? [eTile[0]+opts[0][0], eTile[1]+opts[0][1]] : [eTile[0],eTile[1]];
+    }
+    const reached=stepTo(p.chaosTarget[0],p.chaosTarget[1], base*0.9);
+    if(reached){
+      const ox=eTile[0], oy=eTile[1];
+      p.chaosTarget=[ox*2-p.chaosTarget[0], oy*2-p.chaosTarget[1]];
+      if(!isWalkable(p.chaosTarget[0], p.chaosTarget[1])) p.chaosTarget=[ox,oy];
+    }
+  }
+  else if (p.morilleMode==='huntParasite') {
+    // attaquer le parasite le plus proche (repousse en ligne droite)
+    let targetQ=null, best=1e9;
+    for(const q of Game.parasites){ if(q===p) continue;
+      const d = Math.hypot(q.x-p.x, q.y-p.y);
+      if(d<best){ best=d; targetQ=q; }
+    }
+    const spd = base*1.2;
+    if(targetQ){
+      const dx=targetQ.x-p.x, dy=targetQ.y-p.y, len=Math.hypot(dx,dy)||1;
+      p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
+      if(distance(p.x,p.y,targetQ.x,targetQ.y)<0.6){
+        const tgt = computeKnockbackTargetDir(targetQ, [dx/len, dy/len]);
+        targetQ.kbActive = true; targetQ.kbTx=tgt.x; targetQ.kbTy=tgt.y;
+        targetQ.kbSpeed = Math.max(targetQ.speed*2, 0.22);
+      }
+    }
+  }
+  else if (p.morilleMode==='collect') {
+    // aller chercher des spores pour le compte de la Morille (owner)
+    const target=findNearestPellet([eTile[0],eTile[1]]);
+    if(target){
+      const reached=stepTo(target[0], target[1], base*1.05);
+      if(reached){
+        const gx=target[0], gy=target[1];
+        if(Game.grid[gy] && Game.grid[gy][gx]===2){
+          Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
+          if(p.morilleOwner===1){ Game.score1+=10; UI.score1.textContent=Game.score1; }
+          else if(p.morilleOwner===2){ Game.score2+=10; UI.score2.textContent=Game.score2; }
+        }
+      }
+    }
+  }
+  else if (p.morilleMode==='rushPlayer' && Game.mode==='duo') {
+    // attaquer l'autre joueur avec vitesse x3
+    const tgtPl = (p.morilleOwner===1)? Game.p2 : Game.p1;
+    if(tgtPl){
+      const dx=tgtPl.x-p.x, dy=tgtPl.y-p.y, len=Math.hypot(dx,dy)||1;
+      const spd = base*3.0;
+      p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
+    }
+  }
+
+  parasiteHitPlayers(p);
+  return; // court-circuite le reste de l'IA pour ce parasite
+}
     
     // Serviteur : collecte
     if(p.servant){
@@ -893,107 +1020,29 @@ if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
     }
 
     // Aveugle : errance lente
-    if(p.blind>0){
-      const eff=p.speed*dt*0.5;
-      if(!p.path || p.path.length===0 || Math.random()<0.15){
-        const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0],eTile[1]+d[1]));
-        p.path = opts.length ? [[eTile[0]+opts[0][0], eTile[1]+opts[0][1]]] : [];
-      }
-      if(p.path && p.path.length){
-        const tx=p.path[0][0]+0.5, ty=p.path[0][1]+0.5;
-        const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
-        p.x+=(dx/len)*eff; p.y+=(dy/len)*eff; p.dir=[Math.sign(dx),Math.sign(dy)];
-        if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05) p.path.shift();
-      }
-      parasiteHitPlayers(p);
-      return;
-    }
+if(p.blind>0){
+  const eff=p.speed*dt*0.25; // très lent
+  // direction aléatoire plus fréquente
+  if(!p.path || p.path.length===0 || Math.random()<0.45){
+    const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0],eTile[1]+d[1]));
+    if (opts.length) {
+  const id = (Math.random()*opts.length)|0;
+  p.path = [[eTile[0]+opts[id][0], eTile[1]+opts[id][1]]];
+} else {
+  p.path = [];
+}
+  }
+  if(p.path && p.path.length){
+    const tx=p.path[0][0]+0.5, ty=p.path[0][1]+0.5;
+    const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+    p.x+=(dx/len)*eff; p.y+=(dy/len)*eff; p.dir=[Math.sign(dx),Math.sign(dy)];
+    if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05) p.path.shift();
+  }
+  parasiteHitPlayers(p);
+  return;
+}
 
-    // CHAOS (Morille)
-    if(p.scared>0){
-      p.chaos=true;
-      if(p.chaosTick<=0 || !p.chaosMode){
-        let assigned=false;
-        if(!p.chaosAte && Math.random()<0.10){
-          const near=findNearestPellet(eTile);
-          if(near){ p.chaosMode='eatpellet'; p.chaosTarget=near.slice(0); assigned=true; }
-        }
-        if(!assigned){
-          const modes=['freeze','uturn','bounce','random'];
-          p.chaosMode=modes[(Math.random()*modes.length)|0];
-          p.chaosTarget=null;
-        }
-        p.chaosTick=20+((Math.random()*30)|0);
-      } else { p.chaosTick--; }
-
-      if(p.seedCd>0) p.seedCd--;
-      if(!p.seedOnce && p.seedCd<=0){
-        p.seedCd=60;
-        if(Math.random()<0.10){
-          const bx=eTile[0], by=eTile[1];
-          if(Game.grid[by] && (Game.grid[by][bx]===0 || Game.grid[by][bx]===2)){
-            const exists=Game.bonuses.some(b=>b.x===bx && b.y===by);
-            if(!exists){
-              const kinds=['score','power','freeze'];
-              Game.bonuses.push({x:bx,y:by,kind:kinds[(Math.random()*kinds.length)|0]});
-              p.seedOnce=true;
-            }
-          }
-        }
-      }
-
-      const stepTo=(gx,gy,spd)=>{
-        const tx=gx+0.5, ty=gy+0.5; const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
-        p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
-        if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05){ p.x=tx; p.y=ty; return true; }
-        return false;
-      };
-      const speed=p.speed*dt*0.7;
-
-      if(p.chaosMode==='freeze'){
-      } else if(p.chaosMode==='eatpellet'){
-        if(!p.chaosTarget){ p.chaosMode='random'; }
-        else {
-          const reached=stepTo(p.chaosTarget[0], p.chaosTarget[1], speed*1.1);
-          if(reached){
-            const gx=p.chaosTarget[0], gy=p.chaosTarget[1];
-            if(Game.grid[gy] && Game.grid[gy][gx]===2){
-              Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
-            }
-            p.chaosAte=true; p.chaosMode='random'; p.chaosTarget=null;
-          }
-        }
-      } else if(p.chaosMode==='uturn'){
-        const back=[-(p.dir[0]||0),-(p.dir[1]||0)];
-        let gx=eTile[0]+back[0], gy=eTile[1]+back[1];
-        if(!isWalkable(gx,gy)){
-          const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
-          if(opts.length){ const d=opts[(Math.random()*opts.length)|0]; gx=eTile[0]+d[0]; gy=eTile[1]+d[1]; } else { gx=eTile[0]; gy=eTile[1]; }
-        }
-        stepTo(gx,gy,speed);
-      } else if(p.chaosMode==='bounce'){
-        if(!p.chaosTarget){
-          const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
-          p.chaosTarget = opts.length ? [eTile[0]+opts[0][0], eTile[1]+opts[0][1]] : [eTile[0],eTile[1]];
-        }
-        const reached=stepTo(p.chaosTarget[0],p.chaosTarget[1],speed);
-        if(reached){
-          const ox=eTile[0], oy=eTile[1];
-          p.chaosTarget=[ox*2-p.chaosTarget[0], oy*2-p.chaosTarget[1]];
-          if(!isWalkable(p.chaosTarget[0], p.chaosTarget[1])) p.chaosTarget=[ox,oy];
-        }
-      } else {
-        if(!p.chaosTarget || Math.random()<0.2){
-          const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0], eTile[1]+d[1]));
-          if(opts.length){ const d=opts[(Math.random()*opts.length)|0]; p.chaosTarget=[eTile[0]+d[0], eTile[1]+d[1]]; } else { p.chaosTarget=[eTile[0],eTile[1]]; }
-        }
-        stepTo(p.chaosTarget[0], p.chaosTarget[1], speed*0.9);
-      }
-      parasiteHitPlayers(p);
-      return;
-    }
-
-    // normal
+   // normal
     p.chaos=false; p.chaosMode=null; p.chaosTarget=null;
 
     // cible : joueur visible le plus proche/aligné
@@ -1095,6 +1144,20 @@ function playerHit(pl, hitter){
     return; // <-- court-circuite toute perte de vie/respawn
   }
 
+// Trompette : pendant le pouvoir, toucher un parasite le tue
+if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
+  const idx = Game.parasites.indexOf(hitter);
+  if (idx >= 0) {
+    Game.parasites.splice(idx,1);
+    // (Option) score :
+    if (pl.pid===1){ Game.score1+=50; UI.score1.textContent=Game.score1; }
+    else { Game.score2+=50; UI.score2.textContent=Game.score2; }
+    sfxPower();
+  }
+  return; // aucun dégât sur la Trompette
+}
+
+  
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
 
@@ -1155,6 +1218,10 @@ function updatePlayer(pl, dt){
   if(pl.respawnFlash>0) pl.respawnFlash--;
   if(pl.hitGrace>0) pl.hitGrace--;
   if(pl.hunterWindow>0) pl.hunterWindow--;
+  if (pl.species.id==='cibarius' && pl.hunterWindow===0 && Game.girollePanic.active && Game.girollePanic.ownerPid===pl.pid) {
+  Game.girollePanic.active = false;
+  Game.parasites.forEach(q => { q.fleeGirolle = 0; });
+}
   if(pl.powerTimer>0){
     pl.powerTimer--;
     if(pl.powerTimer<=0){
@@ -1163,6 +1230,7 @@ function updatePlayer(pl, dt){
       (pl.pid===1?UI.power1:UI.power2).textContent='—';
     }
   }
+  if (pl.phaseCooldown>0) pl.phaseCooldown--;
   const want=inputDirFor(pl.pid); if(want[0]||want[1]) pl.nextDir=want.slice(0);
   const tx=Math.floor(pl.x), ty=Math.floor(pl.y); const cx=tx+0.5, cy=ty+0.5; const TURN_EPS=0.45;
   if(pl.frozenTimer>0){ pl.frozenTimer--; pl.dir=[0,0]; }
@@ -1188,11 +1256,28 @@ function updatePlayer(pl, dt){
 
   // spores
   const ntX=Math.floor(pl.x), ntY=Math.floor(pl.y);
+  // === Phalloïde : fin automatique après traversée d'UN mur ===
+if (pl.species.id==='phalloides' && pl.phase) {
+  const isWall = !!(Game.grid[ntY] && Game.grid[ntY][ntX]===1);
+
+  if (!pl.phaseInsideWall && isWall) {
+    // vient d'entrer dans un mur
+    pl.phaseInsideWall = true;
+  } else if (pl.phaseInsideWall && !isWall) {
+    // vient de sortir d'un mur -> couper le pouvoir + cooldown 5s
+    pl.phase = false;
+    pl.powerTimer = 0;
+    pl.phaseInsideWall = false;
+    pl.phaseCooldown = 300; // 5s
+    (pl.pid===1?UI.power1:UI.power2).textContent='—';
+  }
+}
+
   if(Game.grid[ntY] && Game.grid[ntY][ntX]===2){
     Game.grid[ntY][ntX]=0; Game.remaining--; sfxEat(); refreshPelletCell(ntX,ntY);
     if(pl.pid===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else { Game.score2+=10; UI.score2.textContent=Game.score2; }
   }
-
+  
   // bonus
   for(let i=Game.bonuses.length-1;i>=0;i--){
     const b=Game.bonuses[i];
