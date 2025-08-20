@@ -768,6 +768,17 @@ function teleportEntityToOtherVortex(entity, fromGX, fromGY){
   // anti-boucle
   entity.tpGrace = 20; // ~0.33 s
 
+  // si parasite (pas de pid) -> décale hors du vortex + évite 2 s
+if (entity && typeof entity.pid !== 'number') {
+  const opts = neighborsForParasite(target.x, target.y);
+  if (opts.length){
+    const pick = opts[(Math.random()*opts.length)|0];
+    entity.x = pick[0] + 0.5;
+    entity.y = pick[1] + 0.5;
+  }
+  entity.avoidVortex = 120; // ~2 s
+}
+
   // --- AJOUT : si c'est un JOUEUR (possède pid), on déclenche spin + glow 2s
   if (entity && typeof entity.pid === 'number') {
     entity.spinTimer = 120; // 2s @60fps
@@ -835,7 +846,8 @@ const speed = base * SelectedDifficulty.factor;
       fleeGirolle:0,
       morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null,
       confusedTimer:0,
-      tpGrace:0
+      tpGrace:0,
+      avoidVortex: 0  // frames à éviter de repasser sur un vortex
     });
   }
 
@@ -872,7 +884,7 @@ function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
-    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, glowTimer: 0
+    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0
   };
 }
 
@@ -900,7 +912,7 @@ const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
     kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
     fleeGirolle:0,
     morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null, tpGrace:0,
-    confusedTimer:0
+    confusedTimer:0, avoidVortex: 0  // frames à éviter de repasser sur un vortex
   });
 }
 
@@ -1013,6 +1025,44 @@ function dims(){ const dm=gridDims(); return {C:dm.cols,R:dm.rows}; }
 function openTile(tx,ty,pl){ const d=dims(); if(!Game.grid||ty<0||tx<0||ty>=d.R||tx>=d.C) return false; const v=Game.grid[ty][tx]; if(v===1){ if(pl&&pl.phase){ if(tx===0||ty===0||tx===d.C-1||ty===d.R-1) return false; return true; } return false; } return true; }
 function isWalkable(tx,ty){ const d=dims(); if(tx<0||ty<0||tx>=d.C||ty>=d.R) return false; return Game.grid[ty][tx]!==1; }
 function neighbors(tx,ty){ return [[1,0],[-1,0],[0,1],[0,-1]].map(d=>[tx+d[0],ty+d[1]]).filter(p=>isWalkable(p[0],p[1])); }
+function isVortex(tx, ty){
+  return !!(Game.grid[ty] && Game.grid[ty][tx] === VORTEX);
+}
+function isWalkableForParasite(tx, ty){
+  // Un parasite considère un vortex comme “mur mou” pour l’itinéraire
+  return isWalkable(tx,ty) && !isVortex(tx,ty);
+}
+function neighborsForParasite(tx,ty){
+  return [[1,0],[-1,0],[0,1],[0,-1]]
+    .map(d=>[tx+d[0],ty+d[1]])
+    .filter(p=>isWalkableForParasite(p[0],p[1]));
+}
+function bfsParasite(start, goal){
+  const key=(x,y)=>x+','+y;
+  // Si la cible est un vortex, vise un voisin non-vortex
+  if(isVortex(goal[0],goal[1])){
+    const ns = neighborsForParasite(goal[0],goal[1]);
+    if(ns.length) goal = ns[0];
+  }
+  if(!isWalkableForParasite(goal[0],goal[1])) return [];
+  const q=[start];
+  const came=new Map(); came.set(key(start[0],start[1]), null);
+  while(q.length){
+    const node=q.shift(); const x=node[0], y=node[1];
+    if(x===goal[0]&&y===goal[1]) break;
+    const ns=neighborsForParasite(x,y);
+    for(let i=0;i<ns.length;i++){
+      const nx=ns[i][0], ny=ns[i][1]; const k=key(nx,ny);
+      if(!came.has(k)){ came.set(k,[x,y]); q.push([nx,ny]); }
+    }
+  }
+  const path=[]; let cur=goal; const sKey=key(start[0],start[1]);
+  while(cur && key(cur[0],cur[1])!==sKey){
+    const prev=came.get(key(cur[0],cur[1])); if(!prev) break;
+    path.push(cur); cur=prev;
+  }
+  path.reverse(); return path;
+}
 function bfs(start,goal){ const key=(x,y)=>x+','+y; if(!isWalkable(goal[0],goal[1])) return []; const q=[start]; const came=new Map(); came.set(key(start[0],start[1]), null); while(q.length){ const node=q.shift(); const x=node[0], y=node[1]; if(x===goal[0]&&y===goal[1]) break; const ns=neighbors(x,y); for(let i=0;i<ns.length;i++){ const nx=ns[i][0], ny=ns[i][1]; const k=key(nx,ny); if(!came.has(k)){ came.set(k,[x,y]); q.push([nx,ny]); } } } const path=[]; let cur=goal; const sKey=key(start[0],start[1]); while(cur && key(cur[0],cur[1])!==sKey){ const prev=came.get(key(cur[0],cur[1])); if(!prev) break; path.push(cur); cur=prev; } path.reverse(); return path; }
 function sameRowOrCol(a,b){ return a[0]===b[0] || a[1]===b[1]; }
 function hasLineOfSight(a,b){ if(!sameRowOrCol(a,b)) return false; const ax=a[0], ay=a[1], bx=b[0], by=b[1]; if(ax===bx){ const min=Math.min(ay,by), max=Math.max(ay,by); for(let y=min+1;y<max;y++){ if(Game.grid[y][ax]===1) return false; } return true; } else { const min=Math.min(ax,bx), max=Math.max(ax,bx); for(let x=min+1;x<max;x++){ if(Game.grid[ay][x]===1) return false; } return true; } }
@@ -1104,6 +1154,7 @@ function update(dt){
   // Parasites
   Game.parasites.forEach((p,idx)=>{
     if (p.tpGrace>0) p.tpGrace--;
+    if (p.avoidVortex>0) p.avoidVortex--;
     // ---------- Knockback prioritaire + effet domino ----------
     if(p.kbActive){
       const dx = p.kbTx - p.x;
@@ -1149,7 +1200,7 @@ function update(dt){
       const eff = p.speed * dt * 0.4; // lent
       // petit erratisme
       if(Math.random()<0.25){
-        const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(Math.floor(p.x)+d[0],Math.floor(p.y)+d[1]));
+        const opts = neighborsForParasite(Math.floor(p.x), Math.floor(p.y));
         if(opts.length){
           const d=opts[(Math.random()*opts.length)|0];
           p.path = [[Math.floor(p.x)+d[0], Math.floor(p.y)+d[1]]];
@@ -1171,9 +1222,23 @@ function update(dt){
 
 // --- VORTEX : téléportation parasite ---
 if (Game.grid[eTile[1]] && Game.grid[eTile[1]][eTile[0]] === VORTEX) {
-  if (!p.kbActive && (p.tpGrace||0) <= 0) {
+  if (!p.kbActive && p.tpGrace<=0) {
     teleportEntityToOtherVortex(p, eTile[0], eTile[1]);
     p.path=[]; p.lastSeen=null; // reset chemin
+    return; // on ressort : la fonction de TP nous a déjà replacés
+  }
+  // Si on est dessus pendant la tpGrace, on “glisse” immédiatement sur un voisin non-vortex
+  if (p.tpGrace>0) {
+    const opts = neighborsForParasite(eTile[0], eTile[1]);
+    if (opts.length){
+      const [nx,ny] = opts[(Math.random()*opts.length)|0];
+      const tx = nx+0.5, ty = ny+0.5;
+      const dx=tx-p.x, dy=ty-p.y, len=Math.hypot(dx,dy)||1;
+      const spd = p.speed * dt * 1.2;
+      p.x += (dx/len)*spd; p.y += (dy/len)*spd;
+      p.dir=[Math.sign(dx),Math.sign(dy)];
+      return;
+    }
   }
 }
 
@@ -1196,7 +1261,7 @@ if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
   if (owner) {
     const eTile = [Math.floor(p.x), Math.floor(p.y)];
     let best = eTile, bestScore = -1;
-    const ns = neighbors(eTile[0], eTile[1]);
+    const ns = neighborsForParasite(eTile[0], eTile[1]);
     for (let i=0;i<ns.length;i++){
       const nx = ns[i][0], ny = ns[i][1];
       const dist = Math.hypot((nx+0.5)-owner.x, (ny+0.5)-owner.y);
@@ -1322,7 +1387,7 @@ if(p.blind>0){
   const eff=p.speed*dt*0.25; // très lent
   // direction aléatoire plus fréquente
   if(!p.path || p.path.length===0 || Math.random()<0.45){
-    const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0],eTile[1]+d[1]));
+    const opts = neighborsForParasite(eTile[0], eTile[1]);
     if (opts.length) {
   const id = (Math.random()*opts.length)|0;
   p.path = [[eTile[0]+opts[id][0], eTile[1]+opts[id][1]]];
@@ -1359,18 +1424,36 @@ if(p.blind>0){
       }
     }
 
-    if(target){ p.state='chase'; p.lastSeen=[target[0],target[1]]; p.path=bfs(eTile, target); }
-    else if(p.lastSeen){
-      if(eTile[0]===p.lastSeen[0] && eTile[1]===p.lastSeen[1]){ p.lastSeen=null; p.state='search'; p.target=randomOpenTile(); p.path=bfs(eTile, p.target); }
-      else { p.state='search'; p.path=bfs(eTile, p.lastSeen); }
-    } else {
-      if(!p.path || p.path.length===0){ p.state='wander'; p.target=randomOpenTile(); p.path=bfs(eTile, p.target); }
-    }
+if (target) {
+  p.state = 'chase';
+  p.lastSeen = [target[0], target[1]];
+  p.path = bfsParasite(eTile, target);
+} else if (p.lastSeen) {
+  if (eTile[0] === p.lastSeen[0] && eTile[1] === p.lastSeen[1]) {
+    p.lastSeen = null;
+    p.state = 'search';
+    p.target = randomOpenTile();
+    p.path = bfsParasite(eTile, p.target);
+  } else {
+    p.state = 'search';
+    p.path = bfsParasite(eTile, p.lastSeen);
+  }
+} else {
+  if (!p.path || p.path.length === 0) {
+    p.state = 'wander';
+    p.target = randomOpenTile();
+    p.path = bfsParasite(eTile, p.target);
+  }
+}
 
-    if(!p.path || p.path.length===0){
-      const opts=[[1,0],[-1,0],[0,1],[0,-1]].filter(d=>isWalkable(eTile[0]+d[0],eTile[1]+d[1]));
-      if(opts.length){ const d=opts[(Math.random()*opts.length)|0]; p.path=[[eTile[0]+d[0], eTile[1]+d[1]]]; }
-    }
+// Fallback : s'il n'y a toujours aucun chemin, avancer vers un voisin valable (hors vortex)
+if (!p.path || p.path.length === 0) {
+  const opts = neighborsForParasite(eTile[0], eTile[1]);
+  if (opts.length) {
+    const [nx, ny] = opts[(Math.random() * opts.length) | 0];
+    p.path = [[nx, ny]];
+  }
+}
 
     const spd=p.speed*dt;
     if(p.path && p.path.length){
@@ -1520,6 +1603,16 @@ function updatePlayer(pl, dt){
   if(pl.hunterWindow>0) pl.hunterWindow--;
   if (pl.spinTimer > 0) pl.spinTimer--;
   if (pl.glowTimer > 0) pl.glowTimer--;
+  // Spin après téléport : incrémente une phase locale tant que le timer est actif
+if (pl.spinTimer > 0) {
+  pl.spinTimer--;
+  // vitesse ~ 1.5 tours/seconde (ajuste le facteur si tu veux)
+  pl.spinPhase = (pl.spinPhase || 0) + 0.25 * dt; 
+} else {
+  // remet à zéro quand le spin est fini (évite une rotation résiduelle)
+  pl.spinPhase = 0;
+}
+
   if (pl.species.id==='cibarius' && pl.hunterWindow===0 && Game.girollePanic.active && Game.girollePanic.ownerPid===pl.pid) {
   Game.girollePanic.active = false;
   Game.parasites.forEach(q => { q.fleeGirolle = 0; });
@@ -1733,11 +1826,11 @@ Game.vortexes.forEach(v=>{
 function drawPlayerEntity(pl){
   const x = pl.x * TILE, y = pl.y * TILE;
 
-  // --- GLOW "lampe torche" (respawn / départ / téléport) ---
+  // --- GLOW luciole (respawn / départ / téléport) ---
   if(pl.glowTimer > 0){
     const t = performance.now() / 200;
-    const base = 0.6 + 0.4 * Math.sin(t * 2*Math.PI);
-    const fade = pl.glowTimer / 120;           // 2s -> 0
+    const base = 0.6 + 0.4 * Math.sin(t * 2*Math.PI);  // pulsation
+    const fade = pl.glowTimer / 120;                   // décroissance
     const intensity = base * fade;
 
     const r = 28 + 10 * Math.sin(t * 1.3);
@@ -1755,42 +1848,40 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 
-  // --- Sélecteur de sprite ---
-  const drawMushroomAt = (cx, cy) => {
-    if(pl.species.id==='cornucopioides')      drawTrumpet(CTX,cx,cy,28,false,(pl.powerTimer>0));
-    else if(pl.species.id==='muscaria')       drawAmanita(CTX,cx,cy,28,false);
-    else if(pl.species.id==='cibarius')       drawChanterelle(CTX,cx,cy,28,false);
-    else if(pl.species.id==='edulis')         drawCep(CTX,cx,cy,28,false);
-    else if(pl.species.id==='morchella')      drawMorel(CTX,cx,cy,28,false);
-    else if(pl.species.id==='phalloides')     drawPhalloides(CTX,cx,cy,28,false);
+  // --- Fonction de rendu champignon (sprite centré) ---
+  const drawMushroomCentered = (cx, cy) => {
+    if(pl.species.id==='cornucopioides')      drawTrumpet(CTX, cx, cy, 28, false, (pl.powerTimer>0));
+    else if(pl.species.id==='muscaria')       drawAmanita(CTX, cx, cy, 28, false);
+    else if(pl.species.id==='cibarius')       drawChanterelle(CTX, cx, cy, 28, false);
+    else if(pl.species.id==='edulis')         drawCep(CTX, cx, cy, 28, false);
+    else if(pl.species.id==='morchella')      drawMorel(CTX, cx, cy, 28, false);
+    else if(pl.species.id==='phalloides')     drawPhalloides(CTX, cx, cy, 28, false);
   };
 
-  // --- Rotation pendant le spin (ex: après téléportation) ---
+  // --- SPIN après téléportation ---
   if (pl.spinTimer > 0){
-    const angle = performance.now() / 300; // ~3.3 rad/s
+    const angle = performance.now() / 300; // rotation fluide
     CTX.save();
     CTX.translate(x, y);
     CTX.rotate(angle);
-    drawMushroomAt(0, 0);                  // dessine centré dans le repère tourné
+    drawMushroomCentered(0, 0); // champignon tournant
     CTX.restore();
   } else {
-    drawMushroomAt(x, y);                  // rendu normal
+    drawMushroomCentered(x, y); // affichage normal
   }
 
-  // --- Givre (gel) ---
+  // --- Effets supplémentaires ---
   if(pl.frozenTimer > 0){
     CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#9ad6ff';
     CTX.beginPath(); CTX.arc(x, y, 16, 0, Math.PI*2); CTX.fill(); CTX.restore();
   }
 
-  // --- Halo de puissance ---
   if(pl.powerTimer > 0){
     const r=12+(Math.sin(performance.now()/120)+1)*6;
     CTX.beginPath(); CTX.arc(x,y,r,0,Math.PI*2);
     CTX.lineWidth=2; CTX.strokeStyle='rgba(255,255,255,0.55)'; CTX.stroke();
   }
 
-  // --- Flash réapparition ---
   if(pl.respawnFlash > 0){
     const t=performance.now()/120;
     const blink = (Math.floor(t)%2===0) ? 0.85 : 0.35;
@@ -1803,7 +1894,6 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 
-  // --- Onde bouclier Cèpe ---
   if(pl.species.id==='edulis' && pl.hitGrace > 0){
     const t = (45 - pl.hitGrace) / 45;
     const r = 12 + t * 14;
