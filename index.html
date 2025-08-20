@@ -590,7 +590,7 @@ const Game={
   grid:null, remaining:0,
   score1:0, score2:0, lives1:3, lives2:3,
   paused:false, countdown:0,
-  traps:[], bonuses:[], parasites:[], particles:[],
+  traps:[], bonuses:[], parasites:[], particles:[], vortexes:[], 
   muscariaTrap1:null, muscariaTrap2:null,
   p1:null, p2:null,
   servant1:null, servant2:null,
@@ -603,6 +603,98 @@ const Game={
 
 function gridDims(){ const rows=Array.isArray(Game.grid)?Game.grid.length:0; const cols=rows>0 && Array.isArray(Game.grid[0])?Game.grid[0].length:0; return {cols,rows}; }
 
+/* =================== VORTEX : placement proche des angles + carving =================== */
+
+// Carve "croix" douce autour du vortex pour élargir légèrement le passage
+function carvePlus(x, y) {
+  const dm = gridDims(); const C=dm.cols, R=dm.rows;
+  const open = (tx,ty)=>{ if(tx>0&&ty>0&&tx<C-1&&ty<R-1 && Game.grid[ty][tx]===1) Game.grid[ty][tx]=2; };
+  // centre : le vortex lui-même n'a pas de spore -> VORTEX
+  // alentours légers (pas trop) : croix courte
+  open(x-1,y); open(x+1,y); open(x,y-1); open(x,y+1);
+  // coins proches si murs : optionnel mais discret
+  if(Math.random()<0.5){ open(x-1,y-1); }
+  if(Math.random()<0.5){ open(x+1,y-1); }
+  if(Math.random()<0.5){ open(x-1,y+1); }
+  if(Math.random()<0.5){ open(x+1,y+1); }
+}
+
+// Cherche une case ouverte proche d’un angle, sinon on “perce” un peu
+function pickNearCorner(corner) {
+  // corner: 'tl' | 'tr' | 'bl' | 'br'
+  const dm = gridDims(); const C=dm.cols, R=dm.rows;
+  const pad = Math.max(3, Math.floor(Math.min(C,R)*0.12)); // zone angulaire
+  let x0 = (corner==='tl'||corner==='bl') ? 1 : Math.max(1, C-pad-1);
+  let y0 = (corner==='tl'||corner==='tr') ? 1 : Math.max(1, R-pad-1);
+  const x1 = (corner==='tl'||corner==='bl') ? Math.min(C-2, 1+pad) : C-2;
+  const y1 = (corner==='tl'||corner==='tr') ? Math.min(R-2, 1+pad) : R-2;
+
+  // 1) tente une case déjà ouverte (2)
+  for (let tries=0; tries<400; tries++){
+    const x = x0 + ((Math.random()*(x1-x0+1))|0);
+    const y = y0 + ((Math.random()*(y1-y0+1))|0);
+    if (Game.grid[y] && Game.grid[y][x]===2) return {x,y};
+  }
+  // 2) sinon, on perce légèrement depuis la bordure vers l’intérieur
+  for (let tries=0; tries<400; tries++){
+    const x = x0 + ((Math.random()*(x1-x0+1))|0);
+    const y = y0 + ((Math.random()*(y1-y0+1))|0);
+    if (Game.grid[y] && Game.grid[y][x]===1) {
+      // Perce uniquement si un voisin est ouvert, pour rester connecté
+      if (Game.grid[y][x-1]===2 || Game.grid[y][x+1]===2 || Game.grid[y-1]?.[x]===2 || Game.grid[y+1]?.[x]===2) {
+        Game.grid[y][x]=2; // devient ouvert
+        return {x,y};
+      }
+    }
+  }
+  // 3) fallback sûr
+  return findOpenTile();
+}
+
+// Place 4 vortex (un par angle), marque la case comme VORTEX, élargit localement et stocke
+function placeVortexes(){
+  Game.vortexes = [];
+  const corners = ['tl','tr','bl','br'];
+  for (const c of corners){
+    const pos = pickNearCorner(c);
+    // centre = vortex (pas de spore)
+    Game.grid[pos.y][pos.x] = VORTEX;
+    carvePlus(pos.x, pos.y);
+    Game.vortexes.push({x:pos.x, y:pos.y});
+  }
+}
+
+function randomOtherVortexIndex(fromIdx){
+  if(!Array.isArray(Game.vortexes) || Game.vortexes.length<2) return fromIdx;
+  let idx = fromIdx;
+  while (idx===fromIdx) idx = (Math.random()*Game.vortexes.length)|0;
+  return idx;
+}
+
+function teleportEntityToOtherVortex(entity, fromGX, fromGY){
+  if(!Game.vortexes || Game.vortexes.length<2) return;
+  let fromIdx = Game.vortexes.findIndex(v=>v.x===fromGX && v.y===fromGY);
+  if(fromIdx<0) fromIdx = 0;
+  const toIdx = randomOtherVortexIndex(fromIdx);
+  const target = Game.vortexes[toIdx];
+
+  entity.x = target.x + 0.5;
+  entity.y = target.y + 0.5;
+  entity.dir = [0,0];
+
+  // anti-boucle
+  entity.tpGrace = 20; // ~0.33 s
+
+  // --- AJOUT : si c'est un JOUEUR (possède pid), on déclenche spin + glow 2s
+  if (entity && typeof entity.pid === 'number') {
+    entity.spinTimer = 120; // 2s @60fps
+    entity.glowTimer = 120;
+  }
+
+  // petit effet visuel
+  Game.particles.push({x:(target.x*TILE), y:(target.y*TILE), r:0, life:120, type:'cloud'});
+}
+  
 function resetMatch(full){
   full=!!full;
   Game.score1=0; Game.score2=0; Game.lives1=3; Game.lives2=3;
@@ -639,6 +731,9 @@ Game.grid = genLevel(seed);
       if(v===4) Game.traps.push({x,y,t:(i+x+y)%2});
     }
   }
+
+  placeVortexes();
+  
   const count= (6+Math.floor(i*0.8));
   for(let k=0;k<count;k++){
     const pos=findOpenTile();
@@ -656,7 +751,8 @@ const speed = base * SelectedDifficulty.factor;
       // confusion (après impact mur)
       fleeGirolle:0,
       morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null,
-      confusedTimer:0
+      confusedTimer:0,
+      tpGrace:0
     });
   }
 
@@ -693,7 +789,7 @@ function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
-    respawnFlash: 0, hitGrace: 0
+    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, glowTimer: 0
   };
 }
 
@@ -720,13 +816,15 @@ const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
     servant:false,servantTime:0,servantOwner:0,
     kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
     fleeGirolle:0,
-    morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null,
+    morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null, tpGrace:0,
     confusedTimer:0
   });
 }
 
 /* Bonus & spores */
 const BonusKinds=['life','speed','power','score','freeze'];
+  // --- Tuile vortex ---
+const VORTEX = 5; // case spéciale vortex (walkable, sans spore)
 function pickBonusKind(seed){ return BonusKinds[seed%BonusKinds.length]; }
 function spawnSporeCloud(x,y,radTiles=null){
   Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'});
@@ -902,7 +1000,16 @@ function loop(){
   requestAnimationFrame(loop);
 }
 function startCountdown(frames){ Game.countdown=Math.max(1,frames|0); Game.paused=false; }
-function updateCountdown(){ Game.countdown--; if(Game.countdown<=0){ Game.countdown=0; } }
+function updateCountdown(){
+  Game.countdown--;
+  if(Game.countdown<=0){
+    Game.countdown=0;
+    // --- AJOUT : lueur 2s pour le(s) joueur(s)
+    if(Game.p1) Game.p1.glowTimer = Math.max(Game.p1.glowTimer||0, 120);
+    if(Game.mode==='duo' && Game.p2) Game.p2.glowTimer = Math.max(Game.p2.glowTimer||0, 120);
+  }
+}
+
 
 /* Update */
 function update(dt){
@@ -913,6 +1020,7 @@ function update(dt){
 
   // Parasites
   Game.parasites.forEach((p,idx)=>{
+    if (p.tpGrace>0) p.tpGrace--;
     // ---------- Knockback prioritaire + effet domino ----------
     if(p.kbActive){
       const dx = p.kbTx - p.x;
@@ -977,6 +1085,15 @@ function update(dt){
     if(p.scared>0) p.scared--;
     if(p.blind>0) p.blind--;
     const eTile=[Math.max(0,Math.floor(p.x)), Math.max(0,Math.floor(p.y))];
+
+// --- VORTEX : téléportation parasite ---
+if (Game.grid[eTile[1]] && Game.grid[eTile[1]][eTile[0]] === VORTEX) {
+  if (!p.kbActive && (p.tpGrace||0) <= 0) {
+    teleportEntityToOtherVortex(p, eTile[0], eTile[1]);
+    p.path=[]; p.lastSeen=null; // reset chemin
+  }
+}
+
 
     // pièges Amanite (si non serviteur)
     if(!p.servant){
@@ -1255,7 +1372,6 @@ if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
   return; // aucun dégât sur la Trompette
 }
 
-  
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
 
@@ -1306,16 +1422,21 @@ if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
   // Réapparition immédiate + flash 5s
   const s=findOpenTile(); pl.x=s.x+0.5; pl.y=s.y+0.5; pl.dir=[0,0];
   pl.respawnFlash = 5*60; // 5 s
-  pl.invisible=false; pl.phase=false; pl.spinning=false; pl.frozenTimer=0;
+  pl.invisible=false; pl.phase=false; pl.frozenTimer=0;
+  // --- AJOUT : lueur 2s au respawn (sans spin)
+  pl.glowTimer = Math.max(pl.glowTimer||0, 120);
 }
 
 /* Update joueur */
 function updatePlayer(pl, dt){
   if(!pl) return;
   pl.anim+=dt;
+  if (pl.tpGrace>0) pl.tpGrace--;
   if(pl.respawnFlash>0) pl.respawnFlash--;
   if(pl.hitGrace>0) pl.hitGrace--;
   if(pl.hunterWindow>0) pl.hunterWindow--;
+  if (pl.spinTimer > 0) pl.spinTimer--;
+  if (pl.glowTimer > 0) pl.glowTimer--;
   if (pl.species.id==='cibarius' && pl.hunterWindow===0 && Game.girollePanic.active && Game.girollePanic.ownerPid===pl.pid) {
   Game.girollePanic.active = false;
   Game.parasites.forEach(q => { q.fleeGirolle = 0; });
@@ -1323,7 +1444,7 @@ function updatePlayer(pl, dt){
   if(pl.powerTimer>0){
     pl.powerTimer--;
     if(pl.powerTimer<=0){
-      pl.invisible=false; pl.speedBoost=1; pl.spinning=false; pl.shield=false; pl.phase=false;
+      pl.invisible=false; pl.speedBoost=1; pl.shield=false; pl.phase=false;
       pl.girolleTrapImmune=false; pl.trumpetTrapImmune=false;
       (pl.pid===1?UI.power1:UI.power2).textContent='—';
     }
@@ -1354,6 +1475,15 @@ function updatePlayer(pl, dt){
 
   // spores
   const ntX=Math.floor(pl.x), ntY=Math.floor(pl.y);
+
+// --- VORTEX : téléportation joueur ---
+if (Game.grid[ntY] && Game.grid[ntY][ntX] === VORTEX) {
+  if (pl.tpGrace<=0) {
+    teleportEntityToOtherVortex(pl, ntX, ntY);
+    sfxPower(); // petit son optionnel
+  }
+}
+
   // === Phalloïde : fin automatique après traversée d'UN mur ===
 if (pl.species.id==='phalloides' && pl.phase) {
   const isWall = !!(Game.grid[ntY] && Game.grid[ntY][ntX]===1);
@@ -1479,16 +1609,83 @@ function drawTrapsAndBonuses(){
     CTX.font='16px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle=col; CTX.fillText(label,px,py+1);
     CTX.restore();
   });
+// --- VORTEX 🌀 (rotation continue de l’emoji) ---
+Game.vortexes.forEach(v=>{
+  const px = v.x*TILE + TILE/2;
+  const py = v.y*TILE + TILE/2;
+
+  // vitesse de rotation (~0.003 rad/ms -> ~1 tour toutes ~2s)
+  const angle = performance.now() * 0.003;
+
+  CTX.save();
+
+  // anneau externe (fixe)
+  CTX.beginPath();
+  CTX.arc(px, py, 14, 0, Math.PI*2);
+  CTX.fillStyle = 'rgba(150,200,255,0.12)';
+  CTX.fill();
+  CTX.lineWidth = 2;
+  CTX.strokeStyle = 'rgba(150,200,255,0.55)';
+  CTX.stroke();
+
+  // cœur (fixe)
+  CTX.beginPath();
+  CTX.arc(px, py, 8, 0, Math.PI*2);
+  CTX.fillStyle = 'rgba(90,140,255,0.35)';
+  CTX.fill();
+
+  // emoji en rotation
+  CTX.translate(px, py);
+  CTX.rotate(angle);
+  CTX.font = '16px system-ui';
+  CTX.textAlign = 'center';
+  CTX.textBaseline = 'middle';
+  CTX.fillStyle = '#e8f0ff';
+  CTX.fillText('🌀', 0, 1);
+
+  CTX.restore();
+});
 }
 
 function drawPlayerEntity(pl){
   const x=pl.x*TILE, y=pl.y*TILE;
-  if(pl.species.id==='cornucopioides') drawTrumpet(CTX,x,y,28,false,(pl.powerTimer>0));
-  else if(pl.species.id==='muscaria') drawAmanita(CTX,x,y,28,false);
-  else if(pl.species.id==='cibarius') drawChanterelle(CTX,x,y,28,false);
-  else if(pl.species.id==='edulis') drawCep(CTX,x,y,28,false);
-  else if(pl.species.id==='morchella') drawMorel(CTX,x,y,28,false);
-  else if(pl.species.id==='phalloides') drawPhalloides(CTX,x,y,28,false);
+
+  // --- AJOUT : halo/lueur 2s (fade out) ---
+  if(pl.glowTimer > 0){
+    const a = pl.glowTimer / 120;                 // opacité décroissante
+    const r = 22 + 8 * Math.sin(performance.now()/180);
+    CTX.save();
+    CTX.globalAlpha = 0.45 * a;
+    CTX.beginPath();
+    CTX.arc(x, y, r, 0, Math.PI*2);
+    CTX.fillStyle = 'rgba(180,210,255,0.9)';
+    CTX.fill();
+    CTX.restore();
+  }
+  
+    // --- DESSIN champignon (rotation si spin) ---
+  const drawMushroomAt = (cx, cy) => {
+    if(pl.species.id==='cornucopioides') drawTrumpet(CTX,cx,cy,28,false,(pl.powerTimer>0));
+    else if(pl.species.id==='muscaria')  drawAmanita(CTX,cx,cy,28,false);
+    else if(pl.species.id==='cibarius')  drawChanterelle(CTX,cx,cy,28,false);
+    else if(pl.species.id==='edulis')    drawCep(CTX,cx,cy,28,false);
+    else if(pl.species.id==='morchella') drawMorel(CTX,cx,cy,28,false);
+    else if(pl.species.id==='phalloides')drawPhalloides(CTX,cx,cy,28,false);
+  };
+
+  if (pl.spinTimer > 0) {
+    // ~3.3 rad/s : lisible sans donner la nausée
+    const angle = (performance.now() / 300);
+    CTX.save();
+    CTX.translate(x, y);
+    CTX.rotate(angle);
+    // les fonctions de dessin centrent déjà sur (cx,cy) -> on dessine à l'origine transformée
+    drawMushroomAt(0, 0);
+    CTX.restore();
+  } else {
+    // rendu normal (pas de rotation)
+    drawMushroomAt(x, y);
+  }
 
   if(pl.frozenTimer>0){
     CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#9ad6ff';
