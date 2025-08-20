@@ -582,7 +582,20 @@ function decorateMaze(g, rng){
   }
 
   // --- AJOUT : petites placettes aléatoires (garanties connectées)
-  carveRandomPlacettes(g, rng, /*countMin*/2, /*countMax*/5, /*halfMin*/1, /*halfMax*/3);
+  // --- paramètres ADAPTATIFS en fonction de la carte ---
+const area   = w * h;
+const minDim = Math.min(w, h);
+
+// tailles (demi-axes), bornées
+const halfMin = Math.max(1, Math.min(4, (minDim * 0.02) | 0));
+const halfMax = Math.max(halfMin + 1, Math.min(6, (minDim * 0.06) | 0));
+
+// quantités, croissent avec l'aire, bornées
+const countMin = Math.max(2, Math.min(8,  (area / 1500) | 0));
+const countMax = Math.max(countMin + 1, Math.min(12, (area /  900) | 0));
+
+// appel avec paramètres adaptatifs
+carveRandomPlacettes(g, rng, countMin, countMax, halfMin, halfMax);
 
   return g;
 }
@@ -1720,18 +1733,27 @@ Game.vortexes.forEach(v=>{
 function drawPlayerEntity(pl){
   const x=pl.x*TILE, y=pl.y*TILE;
 
-  // --- AJOUT : halo/lueur 2s (fade out) ---
-  if(pl.glowTimer > 0){
-    const a = pl.glowTimer / 120;                 // opacité décroissante
-    const r = 22 + 8 * Math.sin(performance.now()/180);
+  // --- AJOUT : glow type luciole ---
+    if(pl.glowTimer > 0){
+    const t = performance.now() / 200;   // temps fluide
+    const phase = Math.sin(t*2) * 0.5 + 0.5; // pulsation [0..1]
+    const a = (pl.glowTimer / 120) * 0.7; // intensité qui décroît
+    const radius = 18 + 6 * Math.sin(t*3 + pl.x*7 + pl.y*11); // rayon un peu irrégulier
+
     CTX.save();
-    CTX.globalAlpha = 0.45 * a;
+    // dégradé radial pour effet luminescent
+    const grad = CTX.createRadialGradient(x, y, 2, x, y, radius);
+    grad.addColorStop(0, `rgba(150,200,255,${0.6*a})`);
+    grad.addColorStop(0.6, `rgba(120,180,255,${0.25*a*phase})`);
+    grad.addColorStop(1,  `rgba(80,120,200,0)`);
+
+    CTX.fillStyle = grad;
     CTX.beginPath();
-    CTX.arc(x, y, r, 0, Math.PI*2);
-    CTX.fillStyle = 'rgba(180,210,255,0.9)';
+    CTX.arc(x, y, radius, 0, Math.PI*2);
     CTX.fill();
     CTX.restore();
   }
+
   
     // --- DESSIN champignon (rotation si spin) ---
   const drawMushroomAt = (cx, cy) => {
