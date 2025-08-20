@@ -1731,65 +1731,53 @@ Game.vortexes.forEach(v=>{
 }
 
 function drawPlayerEntity(pl){
-  const x=pl.x*TILE, y=pl.y*TILE;
+  const x = pl.x * TILE, y = pl.y * TILE;
 
-  // --- AJOUT : glow type luciole ---
-    if(pl.glowTimer > 0){
-    const t = performance.now() / 200;   // temps fluide
-    const phase = Math.sin(t*2) * 0.5 + 0.5; // pulsation [0..1]
-    const a = (pl.glowTimer / 120) * 0.7; // intensité qui décroît
-    const radius = 18 + 6 * Math.sin(t*3 + pl.x*7 + pl.y*11); // rayon un peu irrégulier
+  // --- GLOW "lampe torche" (respawn / départ / téléport) ---
+  if(pl.glowTimer > 0){
+    const t = performance.now() / 200;  // vitesse des pulsations
+    const base = 0.6 + 0.4 * Math.sin(t * 2*Math.PI); // pulsation 0.2 → 1
+    const fade = pl.glowTimer / 120; // extinction progressive (2s max)
+    const intensity = base * fade;
+
+    const r = 28 + 10 * Math.sin(t * 1.3); // rayon qui respire
+    const g = CTX.createRadialGradient(x, y, r*0.25, x, y, r);
+    g.addColorStop(0, `rgba(255,240,180,${0.65*intensity})`);
+    g.addColorStop(0.4, `rgba(255,220,120,${0.25*intensity})`);
+    g.addColorStop(1, 'rgba(255,220,120,0)');
 
     CTX.save();
-    // dégradé radial pour effet luminescent
-    const grad = CTX.createRadialGradient(x, y, 2, x, y, radius);
-    grad.addColorStop(0, `rgba(150,200,255,${0.6*a})`);
-    grad.addColorStop(0.6, `rgba(120,180,255,${0.25*a*phase})`);
-    grad.addColorStop(1,  `rgba(80,120,200,0)`);
-
-    CTX.fillStyle = grad;
+    CTX.globalCompositeOperation = "screen"; // effet lumineux
+    CTX.fillStyle = g;
     CTX.beginPath();
-    CTX.arc(x, y, radius, 0, Math.PI*2);
+    CTX.arc(x, y, r, 0, Math.PI*2);
     CTX.fill();
     CTX.restore();
   }
 
-  
-    // --- DESSIN champignon (rotation si spin) ---
-  const drawMushroomAt = (cx, cy) => {
-    if(pl.species.id==='cornucopioides') drawTrumpet(CTX,cx,cy,28,false,(pl.powerTimer>0));
-    else if(pl.species.id==='muscaria')  drawAmanita(CTX,cx,cy,28,false);
-    else if(pl.species.id==='cibarius')  drawChanterelle(CTX,cx,cy,28,false);
-    else if(pl.species.id==='edulis')    drawCep(CTX,cx,cy,28,false);
-    else if(pl.species.id==='morchella') drawMorel(CTX,cx,cy,28,false);
-    else if(pl.species.id==='phalloides')drawPhalloides(CTX,cx,cy,28,false);
-  };
+  // --- Sprite du champignon selon l'espèce ---
+  if(pl.species.id==='cornucopioides') drawTrumpet(CTX,x,y,28,false,(pl.powerTimer>0));
+  else if(pl.species.id==='muscaria') drawAmanita(CTX,x,y,28,false);
+  else if(pl.species.id==='cibarius') drawChanterelle(CTX,x,y,28,false);
+  else if(pl.species.id==='edulis') drawCep(CTX,x,y,28,false);
+  else if(pl.species.id==='morchella') drawMorel(CTX,x,y,28,false);
+  else if(pl.species.id==='phalloides') drawPhalloides(CTX,x,y,28,false);
 
-  if (pl.spinTimer > 0) {
-    // ~3.3 rad/s : lisible sans donner la nausée
-    const angle = (performance.now() / 300);
-    CTX.save();
-    CTX.translate(x, y);
-    CTX.rotate(angle);
-    // les fonctions de dessin centrent déjà sur (cx,cy) -> on dessine à l'origine transformée
-    drawMushroomAt(0, 0);
-    CTX.restore();
-  } else {
-    // rendu normal (pas de rotation)
-    drawMushroomAt(x, y);
-  }
-
-  if(pl.frozenTimer>0){
+  // --- Givre (gel) ---
+  if(pl.frozenTimer > 0){
     CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#9ad6ff';
     CTX.beginPath(); CTX.arc(x, y, 16, 0, Math.PI*2); CTX.fill(); CTX.restore();
   }
-  if(pl.powerTimer>0){
+
+  // --- Halo de puissance ---
+  if(pl.powerTimer > 0){
     const r=12+(Math.sin(performance.now()/120)+1)*6;
     CTX.beginPath(); CTX.arc(x,y,r,0,Math.PI*2);
     CTX.lineWidth=2; CTX.strokeStyle='rgba(255,255,255,0.55)'; CTX.stroke();
   }
-  // FLASH réapparition
-  if(pl.respawnFlash>0){
+
+  // --- Flash réapparition ---
+  if(pl.respawnFlash > 0){
     const t=performance.now()/120;
     const blink = (Math.floor(t)%2===0) ? 0.85 : 0.35;
     const r=22 + 6*Math.sin(performance.now()/180);
@@ -1801,8 +1789,8 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 
-  // onde courte lors du bouclier Cèpe
-  if(pl.species.id==='edulis' && pl.hitGrace>0){
+  // --- Onde bouclier Cèpe ---
+  if(pl.species.id==='edulis' && pl.hitGrace > 0){
     const t = (45 - pl.hitGrace) / 45;
     const r = 12 + t * 14;
     CTX.save();
@@ -1815,6 +1803,7 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 }
+
 
 /* Fin de match */
 function endMatch(message){
