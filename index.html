@@ -614,6 +614,11 @@ function resetMatch(full){
   Game.paused=true; Game.countdown=0;
 }
 
+function enemyBaseSpeedAt(levelIdx){
+  // vitesse de base commune à l’init et au respawn
+  return 0.09 + Math.min(0.1, levelIdx * 0.01);
+}
+  
 function loadLevel(i,first=false){
   BIOME=BIOMES[i%BIOMES.length];
 const seed = (SESSION_SEEDS[i] ?? ((Math.random()*1e9)|0)) + (i*101);
@@ -627,15 +632,18 @@ Game.grid = genLevel(seed);
     for(let x=0;x<cols;x++){
       const v=row[x];
       if(v===2) Game.remaining++;
-      if(v===3) Game.bonuses.push({x,y,kind:pickBonusKind((i+y+x)%7)});
+      if (v===3) {
+  const k = (i + y + x) % BonusKinds.length;
+  Game.bonuses.push({ x, y, kind: pickBonusKind(k) });
+}
       if(v===4) Game.traps.push({x,y,t:(i+x+y)%2});
     }
   }
   const count= (6+Math.floor(i*0.8));
   for(let k=0;k<count;k++){
     const pos=findOpenTile();
-    const base=0.09+Math.min(0.1,i*0.01);
-    const speed=base*SelectedDifficulty.factor;
+const base = enemyBaseSpeedAt(i);
+const speed = base * SelectedDifficulty.factor;
     Game.parasites.push({
       x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind:k%4,
       scared:0, blind:0,
@@ -703,7 +711,8 @@ function findOpenTileFarFrom(ref, minD){
   return findOpenTile();
 }
 function findOpenNear(cx,cy){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; const maxR=Math.max(cols,rows); for(let r=0;r<maxR;r++){ for(let dy=-r;dy<=r;dy++){ for(let dx=-r;dx<=r;dx++){ const x=cx+dx,y=cy+dy; if(x>=1&&y>=1&&x<cols-1&&y<rows-1){ if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } } } } return findOpenTile(); }
-function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, LEVEL_INDEX*0.012); const speed=base*SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
+function spawnEnemy(){ const pos=findOpenTile(); const base = enemyBaseSpeedAt(LEVEL_INDEX);
+const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
   Game.parasites.push({
     x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind,
     scared:0,blind:0,state:'wander',lastSeen:null,path:[],
