@@ -75,6 +75,20 @@ let SelectedDifficulty=DIFFICULTIES[2];
 const MATCH_LEVELS_SOLO=12;
 const MATCH_LEVELS_DUO=4;
 
+// --- Semences aléatoires par session de jeu ---
+let SESSION_SEEDS = [];
+function reseedSession(levelCount){
+  const n = Math.max(levelCount|0, 4);
+  if (window.crypto && crypto.getRandomValues) {
+    const arr = new Uint32Array(n);
+    crypto.getRandomValues(arr);
+    SESSION_SEEDS = Array.from(arr, v => (v>>>0) ^ (Date.now()>>>0) ^ ((Math.random()*1e9)|0));
+  } else {
+    SESSION_SEEDS = Array.from({length:n}, () => ((Date.now() + Math.random()*1e9)|0)>>>0);
+  }
+}
+
+
 /* ============ Assets (sprites PNG fournis) ============ */
 const SPRITES_BY_SPECIES = {
   cornucopioides: { game: 'champignon_6_bordered.png', ui: 'champignon_6_bordered.png' }, // Trompette de la mort
@@ -493,6 +507,10 @@ function startGame(){
   ensureAudio();
   Game.started=true;
 
+  // -> Nouveau set de seeds à chaque "Jouer"
+  const levels = (Game.mode==='duo') ? MATCH_LEVELS_DUO : MATCH_LEVELS_SOLO;
+  reseedSession(levels);
+
   Game.showStartHint = 240; // ~4s
   resetMatch(true);
   UI.diff.textContent=SelectedDifficulty.name;
@@ -506,7 +524,6 @@ const BIOMES=[
   {name:'Mousse émeraude', sky1:'#153022', sky2:'#08120c', moss:'#2fd07a', soil:'#1c2a21', fog:'#2fd07a12', wall:'#1e3a2f', deco:'#4ef1a8'}
 ];
 let LEVEL_INDEX=0; let BIOME=BIOMES[0];
-const LEVEL_SEEDS=Array.from({length:12},(_,i)=> (i+1)*1337+(i*i*97));
 
 function mulberry32(seed){ let a=(seed>>>0)||0x9E3779B9; return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
 function isGridShape(grid,c,r){ if(!Array.isArray(grid)||grid.length!==r) return false; for(let y=0;y<r;y++){ if(!Array.isArray(grid[y])||grid[y].length!==c) return false; } return true; }
@@ -532,15 +549,28 @@ function createMaze(w,h,rng){
   for(let y=0;y<h;y++){ g[y][0]=1; g[y][w-1]=1;}
   return g;
 }
-function decorateMaze(g,rng){
+function decorateMaze(g, rng){
   if(!Array.isArray(g)||!g.length||!Array.isArray(g[0])) return g;
   const h=g.length,w=g[0].length;
-  for(let r=0;r<4;r++){
-    const rx=2+((rng()*(w-6))|0), ry=2+((rng()*(h-6))|0);
-    const rw=3+((rng()*6)|0), rh=3+((rng()*6)|0);
-    for(let y=ry;y<Math.min(h-1,ry+rh);y++)
-      for(let x=rx;x<Math.min(w-1,rx+rw);x++) g[y][x]=2;
+
+  // Élargissements locaux connectés (pas de "salles" isolées)
+  const holes = ((w*h)/180)|0; // ~proportion douce selon la taille
+  for(let n=0;n<holes;n++){
+    let tries=24;
+    while(tries--){
+      const x = 1 + ((rng()*(w-2))|0);
+      const y = 1 + ((rng()*(h-2))|0);
+      if (g[y][x]===1){
+        // On ne transforme en 2 que si au moins un voisin est déjà ouvert
+        if (g[y][x-1]===2 || g[y][x+1]===2 || g[y-1][x]===2 || g[y+1][x]===2){
+          g[y][x]=2;
+          break;
+        }
+      }
+    }
   }
+
+  // Distribution aléatoire mais bornée de bonus/pièges sur les cases ouvertes
   for(let y=1;y<h-1;y++){
     for(let x=1;x<w-1;x++){
       if(g[y][x]===2){
@@ -552,6 +582,7 @@ function decorateMaze(g,rng){
   }
   return g;
 }
+
 
 /* ============ État jeu ============ */
 const Game={
@@ -585,8 +616,8 @@ function resetMatch(full){
 
 function loadLevel(i,first=false){
   BIOME=BIOMES[i%BIOMES.length];
-    const seed=LEVEL_SEEDS[i%LEVEL_SEEDS.length]+i*101;
-  Game.grid=genLevel(seed);
+const seed = (SESSION_SEEDS[i] ?? ((Math.random()*1e9)|0)) + (i*101);
+Game.grid = genLevel(seed);
   Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
   Game.muscariaTrap1=null; Game.muscariaTrap2=null; Game.remaining=0;
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
@@ -621,16 +652,26 @@ function loadLevel(i,first=false){
     });
   }
 
-  // joueurs
-  const cMid=(cols/2)|0, rMid=(rows/2)|0;
-  const left=findOpenNear(cMid-3,rMid), right=findOpenNear(cMid+3,rMid);
-  if(first){
-    Game.p1=makePlayer(left.x,left.y,1,Selected1);
-    if(Game.mode==='duo'){ Game.p2=makePlayer(right.x,right.y,2,Selected2); }
-  }else{
-    Game.p1.x=left.x+0.5; Game.p1.y=left.y+0.5; Game.p1.dir=[0,0];
-    if(Game.mode==='duo' && Game.p2){ Game.p2.x=right.x+0.5; Game.p2.y=right.y+0.5; Game.p2.dir=[0,0]; }
+  // joueurs — positions de départ vraiment aléatoires
+  const p1pos = findOpenTile();
+  let p2pos = null;
+  if (Game.mode==='duo'){
+    // essaie d'éloigner les spawns (≈ la moitié de la petite dimension)
+    const dm=gridDims();
+    const minD = Math.max(6, Math.min(dm.cols, dm.rows)/2|0);
+    p2pos = findOpenTileFarFrom(p1pos, minD);
   }
+
+  if(first){
+    Game.p1 = makePlayer(p1pos.x, p1pos.y, 1, Selected1);
+    if(Game.mode==='duo'){ Game.p2 = makePlayer(p2pos.x, p2pos.y, 2, Selected2); }
+  }else{
+    Game.p1.x = p1pos.x+0.5; Game.p1.y = p1pos.y+0.5; Game.p1.dir=[0,0];
+    if(Game.mode==='duo' && Game.p2){
+      Game.p2.x = p2pos.x+0.5; Game.p2.y = p2pos.y+0.5; Game.p2.dir=[0,0];
+    }
+  }
+
 
   buildLayers();
   UI.lvl.textContent=(i+1);
@@ -649,6 +690,18 @@ function makePlayer(tx,ty,pid,species){
 }
 
 function findOpenTile(){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; for(let t=0;t<4000;t++){ const x=(Math.random()*cols)|0, y=(Math.random()*rows)|0; if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } return {x:1,y:1}; }
+function findOpenTileFarFrom(ref, minD){
+  const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
+  const minDist = Math.max(2, minD|0);
+  for(let t=0;t<4000;t++){
+    const x=(Math.random()*cols)|0, y=(Math.random()*rows)|0;
+    if(Game.grid[y] && Game.grid[y][x]===2){
+      const d = Math.abs(x-ref.x)+Math.abs(y-ref.y); // distance de Manhattan
+      if(d>=minDist) return {x,y};
+    }
+  }
+  return findOpenTile();
+}
 function findOpenNear(cx,cy){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; const maxR=Math.max(cols,rows); for(let r=0;r<maxR;r++){ for(let dy=-r;dy<=r;dy++){ for(let dx=-r;dx<=r;dx++){ const x=cx+dx,y=cy+dy; if(x>=1&&y>=1&&x<cols-1&&y<rows-1){ if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } } } } return findOpenTile(); }
 function spawnEnemy(){ const pos=findOpenTile(); const base=0.09+Math.min(0.12, LEVEL_INDEX*0.012); const speed=base*SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
   Game.parasites.push({
