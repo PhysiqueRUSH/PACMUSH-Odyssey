@@ -570,7 +570,7 @@ function decorateMaze(g, rng){
     }
   }
 
-  // Distribution aléatoire mais bornée de bonus/pièges sur les cases ouvertes
+   // Distribution aléatoire mais bornée de bonus/pièges ...
   for(let y=1;y<h-1;y++){
     for(let x=1;x<w-1;x++){
       if(g[y][x]===2){
@@ -580,8 +580,68 @@ function decorateMaze(g, rng){
       }
     }
   }
+
+  // --- AJOUT : petites placettes aléatoires (garanties connectées)
+  carveRandomPlacettes(g, rng, /*countMin*/2, /*countMax*/5, /*halfMin*/1, /*halfMax*/3);
+
   return g;
 }
+
+
+// Ouvre N petites "placettes" (salles) rectangulaires, tailles variables, connectées aux couloirs existants.
+// g : grille (0..4/5), rng : PRNG mulberry32
+function carveRandomPlacettes(g, rng, countMin=2, countMax=5, halfMin=1, halfMax=3) {
+  const H = g.length|0; if (H<=0) return g;
+  const W = (g[0]||[]).length|0; if (W<=0) return g;
+
+  // utilitaires
+  const inb = (x,y)=> (x>1 && y>1 && x<W-2 && y<H-2);
+  const open = (x,y)=>{ if (inb(x,y) && g[y][x]===1) g[y][x]=2; };
+
+  // nombre de placettes aléatoire
+  const nPlac = Math.max(countMin, Math.min(countMax, (countMin + ((rng()*(countMax-countMin+1))|0)) ));
+
+  // essaie de partir d'une case déjà ouverte (2) pour garantir la connexion
+  function pickOpen() {
+    for (let tries=0; tries<200; tries++){
+      const x = 2 + ((rng()*(W-4))|0);
+      const y = 2 + ((rng()*(H-4))|0);
+      if (g[y][x] === 2) return {x,y};
+    }
+    // fallback : on en crée une petite au hasard
+    return { x: (W/2)|0, y: (H/2)|0 };
+  }
+
+  for (let k=0; k<nPlac; k++){
+    const seed = pickOpen();
+    const hx = Math.max(halfMin, Math.min(halfMax, (halfMin + ((rng()*(halfMax-halfMin+1))|0)) ));
+    const hy = Math.max(halfMin, Math.min(halfMax, (halfMin + ((rng()*(halfMax-halfMin+1))|0)) ));
+
+    // centre légèrement bruité depuis la seed
+    const cx = Math.max(2, Math.min(W-3, seed.x + (((rng()*3)|0)-1) ));
+    const cy = Math.max(2, Math.min(H-3, seed.y + (((rng()*3)|0)-1) ));
+
+    // on ouvre un rectangle (cx-hx..cx+hx , cy-hy..cy+hy)
+    for (let y=cy-hy; y<=cy+hy; y++){
+      for (let x=cx-hx; x<=cx+hx; x++){
+        open(x,y);
+      }
+    }
+
+    // petite “respiration” vers l’extérieur pour éviter les salles trop fermées
+    open(cx-hx-1, cy); open(cx+hx+1, cy);
+    open(cx, cy-hy-1); open(cx, cy+hy+1);
+
+    // éventuellement arrondir un peu les coins (option doux)
+    if (rng() < 0.5) open(cx-hx, cy-hy-1);
+    if (rng() < 0.5) open(cx+hx, cy-hy-1);
+    if (rng() < 0.5) open(cx-hx, cy+hy+1);
+    if (rng() < 0.5) open(cx+hx, cy+hy+1);
+  }
+
+  return g;
+}
+
 
 
 /* ============ État jeu ============ */
@@ -608,15 +668,25 @@ function gridDims(){ const rows=Array.isArray(Game.grid)?Game.grid.length:0; con
 // Carve "croix" douce autour du vortex pour élargir légèrement le passage
 function carvePlus(x, y) {
   const dm = gridDims(); const C=dm.cols, R=dm.rows;
-  const open = (tx,ty)=>{ if(tx>0&&ty>0&&tx<C-1&&ty<R-1 && Game.grid[ty][tx]===1) Game.grid[ty][tx]=2; };
-  // centre : le vortex lui-même n'a pas de spore -> VORTEX
-  // alentours légers (pas trop) : croix courte
-  open(x-1,y); open(x+1,y); open(x,y-1); open(x,y+1);
-  // coins proches si murs : optionnel mais discret
-  if(Math.random()<0.5){ open(x-1,y-1); }
-  if(Math.random()<0.5){ open(x+1,y-1); }
-  if(Math.random()<0.5){ open(x-1,y+1); }
-  if(Math.random()<0.5){ open(x+1,y+1); }
+  const open = (tx,ty)=>{
+    if (tx>0 && ty>0 && tx<C-1 && ty<R-1) {
+      if (Game.grid[ty][tx] === 1) Game.grid[ty][tx] = 2; // 2 = ouvert (spore)
+    }
+  };
+
+  // anneau immédiat (3x3) — on n'ouvre PAS le centre, il restera VORTEX
+  for (let dy=-1; dy<=1; dy++){
+    for (let dx=-1; dx<=1; dx++){
+      if (dx===0 && dy===0) continue; // centre = vortex
+      open(x+dx, y+dy);
+    }
+  }
+
+  // petite respiration supplémentaire sur les 4 axes
+  open(x-2, y);
+  open(x+2, y);
+  open(x, y-2);
+  open(x, y+2);
 }
 
 // Cherche une case ouverte proche d’un angle, sinon on “perce” un peu
