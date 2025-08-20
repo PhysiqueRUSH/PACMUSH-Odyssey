@@ -1735,19 +1735,19 @@ function drawPlayerEntity(pl){
 
   // --- GLOW "lampe torche" (respawn / départ / téléport) ---
   if(pl.glowTimer > 0){
-    const t = performance.now() / 200;  // vitesse des pulsations
-    const base = 0.6 + 0.4 * Math.sin(t * 2*Math.PI); // pulsation 0.2 → 1
-    const fade = pl.glowTimer / 120; // extinction progressive (2s max)
+    const t = performance.now() / 200;
+    const base = 0.6 + 0.4 * Math.sin(t * 2*Math.PI);
+    const fade = pl.glowTimer / 120;           // 2s -> 0
     const intensity = base * fade;
 
-    const r = 28 + 10 * Math.sin(t * 1.3); // rayon qui respire
+    const r = 28 + 10 * Math.sin(t * 1.3);
     const g = CTX.createRadialGradient(x, y, r*0.25, x, y, r);
     g.addColorStop(0, `rgba(255,240,180,${0.65*intensity})`);
     g.addColorStop(0.4, `rgba(255,220,120,${0.25*intensity})`);
     g.addColorStop(1, 'rgba(255,220,120,0)');
 
     CTX.save();
-    CTX.globalCompositeOperation = "screen"; // effet lumineux
+    CTX.globalCompositeOperation = "screen";
     CTX.fillStyle = g;
     CTX.beginPath();
     CTX.arc(x, y, r, 0, Math.PI*2);
@@ -1755,13 +1755,27 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 
-  // --- Sprite du champignon selon l'espèce ---
-  if(pl.species.id==='cornucopioides') drawTrumpet(CTX,x,y,28,false,(pl.powerTimer>0));
-  else if(pl.species.id==='muscaria') drawAmanita(CTX,x,y,28,false);
-  else if(pl.species.id==='cibarius') drawChanterelle(CTX,x,y,28,false);
-  else if(pl.species.id==='edulis') drawCep(CTX,x,y,28,false);
-  else if(pl.species.id==='morchella') drawMorel(CTX,x,y,28,false);
-  else if(pl.species.id==='phalloides') drawPhalloides(CTX,x,y,28,false);
+  // --- Sélecteur de sprite ---
+  const drawMushroomAt = (cx, cy) => {
+    if(pl.species.id==='cornucopioides')      drawTrumpet(CTX,cx,cy,28,false,(pl.powerTimer>0));
+    else if(pl.species.id==='muscaria')       drawAmanita(CTX,cx,cy,28,false);
+    else if(pl.species.id==='cibarius')       drawChanterelle(CTX,cx,cy,28,false);
+    else if(pl.species.id==='edulis')         drawCep(CTX,cx,cy,28,false);
+    else if(pl.species.id==='morchella')      drawMorel(CTX,cx,cy,28,false);
+    else if(pl.species.id==='phalloides')     drawPhalloides(CTX,cx,cy,28,false);
+  };
+
+  // --- Rotation pendant le spin (ex: après téléportation) ---
+  if (pl.spinTimer > 0){
+    const angle = performance.now() / 300; // ~3.3 rad/s
+    CTX.save();
+    CTX.translate(x, y);
+    CTX.rotate(angle);
+    drawMushroomAt(0, 0);                  // dessine centré dans le repère tourné
+    CTX.restore();
+  } else {
+    drawMushroomAt(x, y);                  // rendu normal
+  }
 
   // --- Givre (gel) ---
   if(pl.frozenTimer > 0){
