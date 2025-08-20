@@ -230,74 +230,110 @@ function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind,isConfused){
 }
 
 /* ============ Espèces & pouvoirs ============ */
-const Species=[
-  { id:'cornucopioides', name:"Trompette de la mort", power:"Voile total (10s)", desc:"Invisible, parasites aveugles & lents, immunisée aux pièges 10s.", color:'#3d3630',
-    draw:(c,x,y,s,icon,ghost)=>drawTrumpet(c,x,y,s,icon,ghost),
-    use:(me)=>{
-  me.powerTimer = 600;           // ~10s
-  me.invisible  = true;
-  me.trumpetTrapImmune = true;
+const Species = [
+  {
+    id: 'cornucopioides',
+    name: "Trompette de la mort",
+    power: "Voile total (10s)",
+    desc: "Invisible, parasites aveugles & lents, immunisée aux pièges 10s.",
+    color: '#3d3630',
+    draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
+    use: (me) => {
+      me.powerTimer = 600;          // ~10s
+      me.invisible  = true;
+      me.trumpetTrapImmune = true;
 
-  const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
-  const cx = me.x, cy = me.y;
+      const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
+      const cx = me.x, cy = me.y;
 
-  Game.parasites.forEach(p=>{
-    const dx = p.x - cx, dy = p.y - cy;
-    if (Math.hypot(dx,dy) <= radTiles) {
-      p.blind = Math.max(p.blind, 600); // aveugle 10s (lents + aléatoires)
+      Game.parasites.forEach(p => {
+        const dx = p.x - cx, dy = p.y - cy;
+        if (Math.hypot(dx,dy) <= radTiles) {
+          p.blind = Math.max(p.blind, 600); // aveugle 10s
+        }
+      });
     }
-  });
-},
-  { id:'muscaria', name:'Amanite tue-mouches', power:'Piège mycotique', desc:"Pose un piège qui téléporte les parasites.", color:'#c81d1d',
-    draw:drawAmanita,
-    use:(me)=>{ const tx=Math.floor(me.x), ty=Math.floor(me.y); if(me.pid===1) Game.muscariaTrap1={x:tx,y:ty,active:true}; else Game.muscariaTrap2={x:tx,y:ty,active:true}; me.powerTimer=120; }
   },
-  { id:'cibarius', name:'Girolle', power:'Serviteur (15s)', desc:'Convertit 1 parasite en allié collecteur.', color:'#e6a100',
-    draw:drawChanterelle,
-    use:(me)=>{
-  me.powerTimer=900;        // ~15s
-  me.hunterWindow=600;      // fenêtre de capture
-  UI[me.pid===1?'power1':'power2'].textContent='Serviteur ?';
-
-  // Panique globale : tous fuient la Girolle pendant la fenêtre
-  Game.girollePanic.active = true;
-  Game.girollePanic.ownerPid = me.pid;
-  Game.parasites.forEach(p => { p.fleeGirolle = me.hunterWindow; });
-}
-  },
-  { id:'edulis', name:'Cèpe', power:'Robustesse', desc:'Ignore un coup et repousse l’ennemi en chaîne.', color:'#7a4f2a',
-    draw:drawCep,
-    use:(me)=>{ me.powerTimer=360; me.shield=true; }
-  },
-  { id:'morchella', name:'Morille', power:'Essaim de spores', desc:'Chaos global, parasites désorientés.', color:'#6a4f2f',
-    draw:drawMorel,
-    use:(me)=>{
-  me.powerTimer = 600; // 10s d'aura
-  const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
-  const cx = me.x, cy = me.y;
-
-  Game.parasites.forEach(p=>{
-    if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
-      p.morilleChaos = 600;     // durée 10s
-      p.morilleOwner = me.pid;  // propriétaire pour le scoring/target
-      p.morilleNextSwitch = 0;  // switch immédiat au tick suivant
-      p.morilleMode = null;
+  {
+    id: 'muscaria',
+    name: 'Amanite tue-mouches',
+    power: 'Piège mycotique',
+    desc: "Pose un piège qui téléporte les parasites.",
+    color: '#c81d1d',
+    draw: drawAmanita,
+    use: (me) => {
+      const tx = Math.floor(me.x), ty = Math.floor(me.y);
+      if (me.pid===1) Game.muscariaTrap1 = {x:tx,y:ty,active:true};
+      else            Game.muscariaTrap2 = {x:tx,y:ty,active:true};
+      me.powerTimer = 120;
     }
-  });
-
-  // (Option visuelle)
-spawnSporeCloud(me.x, me.y, Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS))));
-},
-  { id:'phalloides', name:'Amanite phalloïde', power:'Phase mycélienne', desc:'Traverse les murs fins brièvement.', color:'#7a8b4b',
-    draw:drawPhalloides,
-    use:(me)=>{
-  if (me.phaseCooldown>0) return; // sécurité
-  me.phase = true;
-  me.phaseInsideWall = false;
-  me.powerTimer = 99999; // on coupera nous-mêmes après 1 mur
-}
   },
+  {
+    id: 'cibarius',
+    name: 'Girolle',
+    power: 'Serviteur (15s)',
+    desc: 'Convertit 1 parasite en allié collecteur.',
+    color: '#e6a100',
+    draw: drawChanterelle,
+    use: (me) => {
+      me.powerTimer = 15*60;   // ~15s
+      me.hunterWindow = 600;   // fenêtre de capture (10s)
+      UI[me.pid===1 ? 'power1' : 'power2'].textContent = 'Serviteur ?';
+
+      Game.girollePanic.active = true;
+      Game.girollePanic.ownerPid = me.pid;
+      Game.parasites.forEach(p => { p.fleeGirolle = me.hunterWindow; });
+    }
+  },
+  {
+    id: 'edulis',
+    name: 'Cèpe',
+    power: 'Robustesse',
+    desc: 'Ignore un coup et repousse l’ennemi en chaîne.',
+    color: '#7a4f2a',
+    draw: drawCep,
+    use: (me) => { me.powerTimer=360; me.shield=true; }
+  },
+  {
+    id: 'morchella',
+    name: 'Morille',
+    power: 'Essaim de spores',
+    desc: 'Chaos global, parasites désorientés.',
+    color: '#6a4f2f',
+    draw: drawMorel,
+    use: (me) => {
+      me.powerTimer = 600; // 10s d'aura
+      const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
+      const cx = me.x, cy = me.y;
+
+      Game.parasites.forEach(p => {
+        if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
+          p.morilleChaos = 600;
+          p.morilleOwner = me.pid;
+          p.morilleNextSwitch = 0;
+          p.morilleMode = null;
+        }
+      });
+      // Option visuelle + léger fear local
+      spawnSporeCloud(me.x, me.y, radTiles);
+    }
+  },
+  {
+    id: 'phalloides',
+    name: 'Amanite phalloïde',
+    power: 'Phase mycélienne',
+    desc: 'Traverse les murs fins brièvement.',
+    color: '#7a8b4b',
+    draw: drawPhalloides,
+    use: (me) => {
+      if (me.phaseCooldown>0) return;
+      me.phase = true;
+      me.phaseInsideWall = false;
+      me.powerTimer = 99999; // on coupera après sortie du 1er mur
+    }
+  }
 ];
+
 let Selected1=Species[0], Selected2=Species[1];
 
 /* =================== OVERLAY / MENU =================== */
