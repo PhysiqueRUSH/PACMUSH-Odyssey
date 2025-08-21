@@ -1697,7 +1697,16 @@ if (pl.spinTimer > 0) {
       const nearAxis = pl.nextDir[0]!==0 ? Math.abs(pl.y-cy)<TURN_EPS : Math.abs(pl.x-cx)<TURN_EPS;
       if(nearAxis && openTile(tx+pl.nextDir[0], ty+pl.nextDir[1], pl)){ if(pl.nextDir[0]!==0) pl.y=cy; else pl.x=cx; pl.dir=pl.nextDir.slice(0); }
     }
-    const spd=pl.speed*(pl.speedBoost||1)*dt;
+// Vitesse de base
+let spdMul = (pl.speedBoost || 1);
+
+// +30% pour la Girolle UNIQUEMENT en difficile "Guerre des Spores"
+// ET UNIQUEMENT pendant la fenêtre de chasse (avant conversion)
+if (pl.species.id === 'cibarius' && SelectedDifficulty.id === 'hard' && pl.hunterWindow > 0) {
+  spdMul *= 1.3;
+}
+
+const spd = pl.speed * spdMul * dt;
     if(pl.dir[0]!==0){
       const sign=pl.dir[0]; let toX=pl.x+sign*spd;
       const fromTileX=Math.floor(pl.x); const toTileX=Math.floor(toX);
