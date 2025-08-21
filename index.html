@@ -1588,17 +1588,17 @@ function playerHit(pl, hitter){
 
 
 // Trompette : pendant le pouvoir, toucher un parasite le tue
-if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
-  const idx = Game.parasites.indexOf(hitter);
-  if (idx >= 0) {
-    Game.parasites.splice(idx,1);
+//if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
+  //const idx = Game.parasites.indexOf(hitter);
+  //if (idx >= 0) {
+    //Game.parasites.splice(idx,1);
     // (Option) score :
-    if (pl.pid===1){ Game.score1+=50; UI.score1.textContent=Game.score1; }
-    else { Game.score2+=50; UI.score2.textContent=Game.score2; }
-    sfxPower();
-  }
-  return; // aucun dégât sur la Trompette
-}
+  //  if (pl.pid===1){ Game.score1+=50; UI.score1.textContent=Game.score1; }
+ //   else { Game.score2+=50; UI.score2.textContent=Game.score2; }
+   // sfxPower();
+  //}
+ //return; // aucun dégât sur la Trompette
+//}
 
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
