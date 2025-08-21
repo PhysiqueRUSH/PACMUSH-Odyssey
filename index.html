@@ -27,6 +27,7 @@
 </style>
 </head>
 <body>
+  <audio id="bgm" src="mushroom_hill_zone.mp3" loop></audio>
   <div id="wrap">
     <div id="hud">
       <div class="pill">Mode : <span id="mode">Solo</span></div>
@@ -40,6 +41,34 @@
   </div>
 
 <script>
+  // 🎵 Gestion musique
+let bgm;
+
+function initMusic() {
+  bgm = document.getElementById("bgm");
+  bgm.volume = 0.4; // volume de 0.0 (muet) à 1.0 (max)
+}
+
+function startMusic() {
+  if (bgm) {
+    bgm.play().catch(e => {
+      console.log("Lecture auto bloquée par le navigateur :", e);
+    });
+  }
+}
+
+function stopMusic() {
+  if (bgm) bgm.pause();
+}
+
+// Initialisation musique
+initMusic();
+
+// ⚠️ Les navigateurs bloquent la lecture automatique,
+// on démarre la musique dès le 1er clic ou touche
+document.addEventListener("keydown", startMusic, {once:true});
+document.addEventListener("click", startMusic, {once:true});
+
 /* =================== CODE COMPLET =================== */
 /* ============ Réfs UI ============ */
 const CANVAS = document.getElementById('game');
@@ -178,17 +207,42 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const distance=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
 const makeLayerCanvas=(w,h)=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
 
-/* ============ Audio ============ */
-let ACTX=null, MASTER=null, STARTED=false;
-function ensureAudio(){ if(STARTED) return; STARTED=true; ACTX=new (window.AudioContext||window.webkitAudioContext)(); MASTER=ACTX.createGain(); MASTER.gain.value=0.18; MASTER.connect(ACTX.destination); startMusic(); }
-function tone(time,freq,dur,type='sine',vol=0.2){ if(!ACTX) return; const o=ACTX.createOscillator(), g=ACTX.createGain(); o.type=type; o.frequency.setValueAtTime(freq,time); g.gain.value=0; g.gain.linearRampToValueAtTime(vol,time+0.01); g.gain.exponentialRampToValueAtTime(0.0001,time+dur); o.connect(g); g.connect(MASTER); o.start(time); o.stop(time+dur); }
+/* ============ Audio (SFX uniquement — musique via <audio id="bgm">) ============ */
+let ACTX = null, MASTER = null, STARTED = false;
+
+// Initialise le contexte audio pour les effets sonores SEULEMENT (plus de musique synthé)
+function ensureAudio(){
+  if (STARTED) return;
+  STARTED = true;
+  ACTX = new (window.AudioContext || window.webkitAudioContext)();
+  MASTER = ACTX.createGain();
+  MASTER.gain.value = 0.18;
+  MASTER.connect(ACTX.destination);
+}
+
+// Générateur d’effets (bips) pour le gameplay
+function tone(time,freq,dur,type='sine',vol=0.2){
+  if(!ACTX) return;
+  const o=ACTX.createOscillator(), g=ACTX.createGain();
+  o.type=type;
+  o.frequency.setValueAtTime(freq,time);
+  g.gain.value=0;
+  g.gain.linearRampToValueAtTime(vol,time+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,time+dur);
+  o.connect(g); g.connect(MASTER);
+  o.start(time); o.stop(time+dur);
+}
+
+// Effets sonores conservés
 function sfxEat(){ if(!ACTX) return; const t=ACTX.currentTime; tone(t,740,.05,'triangle',.2); }
 function sfxPower(){ if(!ACTX) return; const t=ACTX.currentTime; tone(t,520,.1,'sawtooth',.22); tone(t+.1,880,.1,'square',.18); }
 function sfxHit(){ if(!ACTX) return; const t=ACTX.currentTime; tone(t,160,.08,'sawtooth',.3); }
 function sfxWin(){ if(!ACTX) return; const t=ACTX.currentTime; [660,880,990,1320].forEach((f,i)=>tone(t+i*.1,f,.1,'triangle',.2)); }
 function sfxLife(){ if(!ACTX) return; const t=ACTX.currentTime; [660,990,1320].forEach((f,i)=>tone(t+i*.08,f,.08,'sine',.22)); }
-function startMusic(){ if(!ACTX) return; const bpm=128, beat=60/bpm; const len=8*beat; (function loop(){ const t=ACTX.currentTime+0.05; const seq=[660,660,495,660,825,660,495,440]; const bass=[110,110,82,110,147,110,82,73]; for(let i=0;i<8;i++){ const nt=t+i*beat; tone(nt,seq[i],.18,'triangle',.07); tone(nt,bass[i],.25,'sine',.05);} setTimeout(loop,len*1000);}()) }
+
+// On crée le contexte SFX au premier clic sur le canvas (aucune musique n’est lancée ici)
 CANVAS.addEventListener('click', ensureAudio);
+
 
 /* ============ Dessin entités ============ */
 function drawTrumpet(ctx, cx, cy, size, icon, ghost){
