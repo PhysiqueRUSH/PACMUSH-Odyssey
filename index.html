@@ -884,7 +884,7 @@ function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
-    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0
+    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0, invulnTimer: 0
   };
 }
 
@@ -1504,26 +1504,34 @@ function parasiteHitPlayers(p){
 
 
 function playerHit(pl, hitter){
-  // --- GIROLLE (cibarius) ---
-  // Pendant la fenêtre active :
-  //  - si on touche un parasite non-serviteur => on le convertit et on stoppe la panique
-  //  - si le parasite est déjà serviteur (conversion faite ailleurs la même frame) => on ignore tout
-  //  - dans tous les cas on NE perd pas de vie et on NE TP pas
-  if (pl.species.id === 'cibarius' && pl.hunterWindow > 0) {
-    if (hitter && !hitter.servant) {
-      releaseServant(pl.pid);
-      convertToServant(hitter, pl.pid);
-      pl.hunterWindow = 0;
+  // --- GIROLLE (cibarius) : invulnérable pendant la chasse et 1s après conversion ---
+  if (pl.species.id === 'cibarius') {
 
-      // Fin immédiate de la panique seulement s'il y a conversion
-      Game.girollePanic.active = false;
-      Game.parasites.forEach(q => { q.fleeGirolle = 0; });
+    // 3.a Pendant la fenêtre de chasse : aucune perte de vie.
+    if (pl.hunterWindow > 0) {
+      // Si on percute un parasite non-serviteur -> conversion immédiate
+      if (hitter && !hitter.servant) {
+        releaseServant(pl.pid);
+        convertToServant(hitter, pl.pid);
+        pl.hunterWindow = 0;        // fin de la fenêtre de chasse
+        pl.invulnTimer = 60;        // invulnérable encore 1 seconde
+        (pl.pid===1?UI.power1:UI.power2).textContent='Serviteur ✓';
+        sfxPower();
 
-      (pl.pid===1?UI.power1:UI.power2).textContent='Serviteur ✓';
-      sfxPower();
+        // Fin de la panique déclenchée par la Girolle
+        Game.girollePanic.active = false;
+        Game.parasites.forEach(q => { q.fleeGirolle = 0; });
+      }
+      // Qu'il y ait conversion ou pas : aucune perte de vie pendant la chasse
+      return;
     }
-    return; // <-- court-circuite toute perte de vie/respawn
+
+    // 3.b Après conversion : encore 1s d'invulnérabilité
+    if (pl.invulnTimer > 0) {
+      return; // aucune perte de vie
+    }
   }
+
 
 // Trompette : pendant le pouvoir, toucher un parasite le tue
 if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
@@ -1603,6 +1611,7 @@ function updatePlayer(pl, dt){
   if(pl.hunterWindow>0) pl.hunterWindow--;
   if (pl.spinTimer > 0) pl.spinTimer--;
   if (pl.glowTimer > 0) pl.glowTimer--;
+  if (pl.invulnTimer > 0) pl.invulnTimer--;
   // Spin après téléport : incrémente une phase locale tant que le timer est actif
 if (pl.spinTimer > 0) {
   pl.spinTimer--;
