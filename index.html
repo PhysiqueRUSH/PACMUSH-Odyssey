@@ -948,6 +948,13 @@ const speed = base * SelectedDifficulty.factor;
     }
   }
 
+  // --- RESET des effets temporaires à chaque début de niveau
+resetPlayerTransientForNewLevel(Game.p1);
+if (Game.mode === 'duo' && Game.p2) resetPlayerTransientForNewLevel(Game.p2);
+
+// Nettoie les libellés pouvoirs dans le HUD
+UI.power1.textContent = '—';
+if (Game.mode === 'duo') UI.power2.textContent = '—';
 
   buildLayers();
   UI.lvl.textContent=(i+1);
@@ -965,6 +972,43 @@ function makePlayer(tx,ty,pid,species){
     trumpetCd:0
   };
 }
+
+  // --- RESET ÉTATS TEMPORAIRES AU DÉBUT D'UN NOUVEAU NIVEAU ---
+// (ne touche pas aux compteurs long-terme comme collectedSpores)
+function resetPlayerTransientForNewLevel(pl){
+  if(!pl) return;
+  // Effets de pouvoir en cours
+  pl.powerTimer = 0;
+  pl.invisible  = false;
+  pl.speedBoost = 1;
+  pl.shield     = false;
+
+  // Phalloïde
+  pl.phase = false;
+  pl.phaseInsideWall = false;
+  pl.phaseCooldown   = 0;
+
+  // Girolle
+  pl.hunterWindow = 0;
+  pl.invulnTimer  = 0;
+
+  // Trompette
+  pl.trumpetCd = 0;              // on remet le CD à 0 entre niveaux
+  pl.trumpetTrapImmune = false;
+
+  // Divers runtime
+  pl.hitGrace = 0;
+  pl.frozenTimer = 0;
+  pl.respawnFlash = 0;
+  pl.spinTimer = 0;
+  pl.spinPhase = 0;
+  pl.glowTimer = 0;
+  pl.tpGrace = 0;
+  pl.nextPowerExtend = 0;
+
+  // IMPORTANT : on NE remet PAS pl.collectedSpores ici
+}
+
 
 function resetPlayerRuntimeState(pl){
   if(!pl) return;
