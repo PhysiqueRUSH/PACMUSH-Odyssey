@@ -1301,6 +1301,57 @@ function bfsParasite(start, goal){
   }
   path.reverse(); return path;
 }
+
+function tileCenter(gx, gy){ return [gx + 0.5, gy + 0.5]; }
+
+function stepTowardsPoint(p, tx, ty, spd){
+  const dx = tx - p.x, dy = ty - p.y, len = Math.hypot(dx,dy) || 1;
+  p.x += (dx/len) * spd;
+  p.y += (dy/len) * spd;
+  p.dir = [Math.sign(dx), Math.sign(dy)];
+}
+
+function chaseViaPath(p, targetGX, targetGY, speedMul, dt){
+  const eTile = [Math.floor(p.x), Math.floor(p.y)];
+  // Chemin par tuiles (les parasites évitent les vortex)
+  const path = bfsParasite(eTile, [targetGX, targetGY]);
+  const base = p.speed * dt * (speedMul || 1);
+
+  if (path && path.length){
+    const nx = path[0][0], ny = path[0][1];
+    const [tx, ty] = tileCenter(nx, ny);
+    stepTowardsPoint(p, tx, ty, base);
+    // si atteint le centre -> consomme l’étape
+    if (Math.abs(p.x - tx) < 0.05 && Math.abs(p.y - ty) < 0.05){
+      p.x = tx; p.y = ty;
+      path.shift();
+    }
+    // mémorise le chemin restant
+    p.path = path;
+  } else {
+    // Pas de chemin : petit déplacement au hasard mais RESTANT DANS LE WALKABLE
+    const opts = neighborsForParasite(eTile[0], eTile[1]);
+    if (opts.length){
+      const [gx, gy] = opts[(Math.random()*opts.length)|0];
+      const [tx, ty] = tileCenter(gx, gy);
+      stepTowardsPoint(p, tx, ty, base * 0.9);
+    }
+  }
+}
+
+function safeClampParasite(p){
+  const gx = Math.floor(p.x), gy = Math.floor(p.y);
+  if (!isWalkableForParasite(gx, gy)){
+    const near = findOpenNear(gx, gy);   // ta fonction existe déjà
+    p.x = near.x + 0.5;
+    p.y = near.y + 0.5;
+    p.dir = [0,0];
+    p.path = [];
+    p.lastSeen = null;
+  }
+}
+
+  
 function bfs(start,goal){ const key=(x,y)=>x+','+y; if(!isWalkable(goal[0],goal[1])) return []; const q=[start]; const came=new Map(); came.set(key(start[0],start[1]), null); while(q.length){ const node=q.shift(); const x=node[0], y=node[1]; if(x===goal[0]&&y===goal[1]) break; const ns=neighbors(x,y); for(let i=0;i<ns.length;i++){ const nx=ns[i][0], ny=ns[i][1]; const k=key(nx,ny); if(!came.has(k)){ came.set(k,[x,y]); q.push([nx,ny]); } } } const path=[]; let cur=goal; const sKey=key(start[0],start[1]); while(cur && key(cur[0],cur[1])!==sKey){ const prev=came.get(key(cur[0],cur[1])); if(!prev) break; path.push(cur); cur=prev; } path.reverse(); return path; }
 function sameRowOrCol(a,b){ return a[0]===b[0] || a[1]===b[1]; }
 function hasLineOfSight(a,b){ if(!sameRowOrCol(a,b)) return false; const ax=a[0], ay=a[1], bx=b[0], by=b[1]; if(ax===bx){ const min=Math.min(ay,by), max=Math.max(ay,by); for(let y=min+1;y<max;y++){ if(Game.grid[y][ax]===1) return false; } return true; } else { const min=Math.min(ax,bx), max=Math.max(ax,bx); for(let x=min+1;x<max;x++){ if(Game.grid[ay][x]===1) return false; } return true; } }
@@ -1423,6 +1474,7 @@ function update(dt){
 if (p.frozen > 0) {
   p.frozen--;
   // pas de déplacement ni d'IA, mais on conserve le check de collision:
+  safeClampParasite(p)
   parasiteHitPlayers(p);
   return;
 }
@@ -1462,6 +1514,7 @@ if (p.frozen > 0) {
           }
         }
       }
+      safeClampParasite(p)
       parasiteHitPlayers(p);
       return; // tant que knockback actif
     }
@@ -1484,6 +1537,7 @@ if (p.frozen > 0) {
         p.x+=(dx/len)*eff; p.y+=(dy/len)*eff; p.dir=[Math.sign(dx),Math.sign(dy)];
         if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05) p.path.shift();
       }
+      safeClampParasite(p)
       parasiteHitPlayers(p);
       return;
     }
@@ -1546,6 +1600,7 @@ if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
     p.dir = [Math.sign(dx), Math.sign(dy)];
   }
 
+  safeClampParasite(p)
   parasiteHitPlayers(p);
   return; // on court-circuite les autres IA (serviteur/aveugle/chaos/normal)
 }
@@ -1587,49 +1642,59 @@ if (p.morilleChaos > 0) {
     }
   }
   else if (p.morilleMode==='huntParasite') {
-    // attaquer le parasite le plus proche (repousse en ligne droite)
-    let targetQ=null, best=1e9;
-    for(const q of Game.parasites){ if(q===p) continue;
-      const d = Math.hypot(q.x-p.x, q.y-p.y);
-      if(d<best){ best=d; targetQ=q; }
-    }
-    const spd = base*1.2;
-    if(targetQ){
-      const dx=targetQ.x-p.x, dy=targetQ.y-p.y, len=Math.hypot(dx,dy)||1;
-      p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
-      if(distance(p.x,p.y,targetQ.x,targetQ.y)<0.6){
-        const tgt = computeKnockbackTargetDir(targetQ, [dx/len, dy/len]);
-        targetQ.kbActive = true; targetQ.kbTx=tgt.x; targetQ.kbTy=tgt.y;
-        targetQ.kbSpeed = Math.max(targetQ.speed*2, 0.22);
-      }
-    }
+  // cible : parasite le plus proche (hors soi)
+  let targetQ = null, best = 1e9;
+  for (const q of Game.parasites){
+    if (q === p) continue;
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < best){ best = d; targetQ = q; }
   }
-  else if (p.morilleMode==='collect') {
-    // aller chercher des spores pour le compte de la Morille (owner)
-    const target=findNearestPellet([eTile[0],eTile[1]]);
-    if(target){
-      const reached=stepTo(target[0], target[1], base*1.05);
-      if(reached){
-        const gx=target[0], gy=target[1];
-        if(Game.grid[gy] && Game.grid[gy][gx]===2){
-          Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
-          if(p.morilleOwner===1){ Game.score1+=10; UI.score1.textContent=Game.score1; }
-          else if(p.morilleOwner===2){ Game.score2+=10; UI.score2.textContent=Game.score2; }
-          updateLeaderHUD();
-        }
-      }
-    }
-  }
-  else if (p.morilleMode==='rushPlayer' && Game.mode==='duo') {
-    // attaquer l'autre joueur avec vitesse x3
-    const tgtPl = (p.morilleOwner===1)? Game.p2 : Game.p1;
-    if(tgtPl){
-      const dx=tgtPl.x-p.x, dy=tgtPl.y-p.y, len=Math.hypot(dx,dy)||1;
-      const spd = base*3.0;
-      p.x+=(dx/len)*spd; p.y+=(dy/len)*spd; p.dir=[Math.sign(dx),Math.sign(dy)];
-    }
-  }
+  if (targetQ){
+    const tgx = Math.floor(targetQ.x), tgy = Math.floor(targetQ.y);
+    // Déplacement via BFS (x1.2 la vitesse)
+    chaseViaPath(p, tgx, tgy, 1.2, dt);
 
+    // Si contact proche, on déclenche un knockbackSUR la base du vecteur (mais on calcule la cible mur via helper)
+    if (distance(p.x, p.y, targetQ.x, targetQ.y) < 0.6){
+      const tgt = computeKnockbackTargetDir(targetQ, [targetQ.x - p.x, targetQ.y - p.y]);
+      targetQ.kbActive = true;
+      targetQ.kbTx = tgt.x;
+      targetQ.kbTy = tgt.y;
+      targetQ.kbSpeed = Math.max(targetQ.speed*2, 0.22);
+      targetQ.kbDir = [Math.sign(tgt.x - targetQ.x), Math.sign(tgt.y - targetQ.y)];
+    }
+  }
+}
+  else if (p.morilleMode==='collect') {
+  const eTile = [Math.floor(p.x), Math.floor(p.y)];
+  const target = findNearestPellet(eTile);
+  if (target){
+    const [tgx, tgy] = target;
+    // BFS (x1.05 la vitesse)
+    chaseViaPath(p, tgx, tgy, 1.05, dt);
+
+    // Si atteint, on ramasse proprement (en vérifiant la tuile)
+    if (Math.floor(p.x) === tgx && Math.floor(p.y) === tgy){
+      if (Game.grid[tgy] && Game.grid[tgy][tgx] === 2){
+        Game.grid[tgy][tgx] = 0; Game.remaining--; sfxEat(); refreshPelletCell(tgx, tgy);
+        if (p.morilleOwner === 1){ Game.score1 += 10; UI.score1.textContent = Game.score1; }
+        else if (p.morilleOwner === 2){ Game.score2 += 10; UI.score2.textContent = Game.score2; }
+        updateLeaderHUD();
+      }
+    }
+  }
+}
+
+else if (p.morilleMode==='rushPlayer' && Game.mode==='duo') {
+  const tgtPl = (p.morilleOwner===1)? Game.p2 : Game.p1;
+  if (tgtPl){
+    const tgx = Math.floor(tgtPl.x), tgy = Math.floor(tgtPl.y);
+    // BFS avec vitesse x3
+    chaseViaPath(p, tgx, tgy, 3.0, dt);
+  }
+}
+
+  safeClampParasite(p)
   parasiteHitPlayers(p);
   return; // court-circuite le reste de l'IA pour ce parasite
 }
@@ -1652,6 +1717,7 @@ if (p.morilleChaos > 0) {
           }
         }
       }
+      safeClampParasite(p)
       parasiteHitPlayers(p);
       return;
     }
@@ -1675,6 +1741,7 @@ if(p.blind>0){
     p.x+=(dx/len)*eff; p.y+=(dy/len)*eff; p.dir=[Math.sign(dx),Math.sign(dy)];
     if(Math.abs(p.x-tx)<0.05 && Math.abs(p.y-ty)<0.05) p.path.shift();
   }
+  safeClampParasite(p)
   parasiteHitPlayers(p);
   return;
 }
@@ -1737,6 +1804,7 @@ if (!p.path || p.path.length === 0) {
       p.x += (dx/len)*spd; p.y += (dy/len)*spd; p.dir=[Math.sign(dx), Math.sign(dy)];
       if(Math.abs(p.x-targetX)<0.05 && Math.abs(p.y-targetY)<0.05){ p.x=targetX; p.y=targetY; p.path.shift(); }
     }
+    safeClampParasite(p)
     parasiteHitPlayers(p);
   });
 
