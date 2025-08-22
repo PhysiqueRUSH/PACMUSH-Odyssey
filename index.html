@@ -31,7 +31,7 @@
   <div id="wrap">
     <div id="hud">
       <div class="pill">Mode : <span id="mode">Solo</span></div>
-      <div class="pill">Niveau : <span id="lvl">1</span></div>
+      <div class="pill" id="leaderPill" style="display:none">Leader : <span id="leaderText" style="color:#ff4d4d;font-weight:800">—</span></div>
       <div class="pill">J1 — Score: <span id="score1">0</span> · Vies: <span id="lives1">3</span> · Pouvoir: <span id="power1">—</span></div>
       <div class="pill" id="p2hud" style="display:none">J2 — Score: <span id="score2">0</span> · Vies: <span id="lives2">3</span> · Pouvoir: <span id="power2">—</span></div>
       <div class="pill">Difficulté : <span id="diff">Guerre des Spores</span></div>
@@ -75,7 +75,8 @@ const CANVAS = document.getElementById('game');
 const CTX = CANVAS.getContext('2d');
 const W = CANVAS.width, H = CANVAS.height;
 const UI = {
-  lvl:document.getElementById('lvl'),
+  leaderPill: document.getElementById('leaderPill'),
+  leaderText: document.getElementById('leaderText'),
   mode:document.getElementById('mode'),
   diff:document.getElementById('diff'),
   score1:document.getElementById('score1'),
@@ -101,8 +102,8 @@ const DIFFICULTIES=[
 ];
 let SelectedDifficulty=DIFFICULTIES[2];
 
-const MATCH_LEVELS_SOLO=12;
-const MATCH_LEVELS_DUO=4;
+const MATCH_LEVELS_SOLO=1;
+const MATCH_LEVELS_DUO=1;
 
 // --- Semences aléatoires par session de jeu ---
 let SESSION_SEEDS = [];
@@ -209,6 +210,25 @@ const now=()=>performance.now();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const distance=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
 const makeLayerCanvas=(w,h)=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
+// === HUD Leader (visible UNIQUEMENT en mode 2 joueurs) ===
+function updateLeaderHUD(){
+  if (!UI.leaderPill || !UI.leaderText) return;
+
+  if (Game.mode !== 'duo') {
+    // Solo -> rien
+    UI.leaderPill.style.display = 'none';
+    UI.leaderText.textContent = '—';
+    return;
+  }
+
+  // Duo -> on montre la pastille
+  UI.leaderPill.style.display = '';
+  let txt = 'Égalité';
+  if (Game.score1 > Game.score2) txt = 'J1 en tête';
+  else if (Game.score2 > Game.score1) txt = 'J2 en tête';
+  UI.leaderText.textContent = txt;
+}
+
 
 /* ============ Audio (SFX uniquement — musique via <audio id="bgm">) ============ */
 let ACTX = null, MASTER = null, STARTED = false;
@@ -580,11 +600,11 @@ function startGame(){
   ensureAudio();
   Game.started=true;
 
-  const levels = (Game.mode==='duo') ? MATCH_LEVELS_DUO : MATCH_LEVELS_SOLO;
-  reseedSession(levels);
+  reseedSession(1);
 
   Game.showStartHint = 240;
   resetMatch(true);
+  updateLeaderHUD();
   UI.diff.textContent=SelectedDifficulty.name;
 }
 
@@ -870,11 +890,12 @@ function resetMatch(full){
   full=!!full;
   Game.score1=0; Game.score2=0; Game.lives1=3; Game.lives2=3;
   LEVEL_INDEX=0;
-  Game.levelsToPlay = (Game.mode==='duo')? MATCH_LEVELS_DUO : MATCH_LEVELS_SOLO;
+  Game.levelsToPlay = 1;
   loadLevel(0,true);
   UI.mode.textContent=(Game.mode==='duo'?'2 Joueurs':'Solo');
   UI.p2hud.style.display=(Game.mode==='duo')?'':'none';
   Game.paused=true; Game.countdown=0;
+  updateLeaderHUD();
 }
 
 function enemyBaseSpeedAt(levelIdx){
@@ -962,6 +983,7 @@ if (Game.mode === 'duo') UI.power2.textContent = '—';
   UI.score2.textContent=Game.score2; UI.lives2.textContent=Game.lives2; UI.power2.textContent='—';
   UI.diff.textContent=SelectedDifficulty.name;
   Game.paused=true; Game.countdown=0;
+  updateLeaderHUD();
 }
 
 function makePlayer(tx,ty,pid,species){
@@ -1271,8 +1293,11 @@ function eatBonusFor(player,b){
       (player.pid===1?UI.power1:UI.power2).textContent='★ prêt (+2s)'; sfxPower();
       break;
     case 'score':
-      if(player.pid===1){ Game.score1+=500; UI.score1.textContent=Game.score1; } else { Game.score2+=500; UI.score2.textContent=Game.score2; }
-      sfxPower(); break;
+      if(player.pid===1){ Game.score1+=500; UI.score1.textContent=Game.score1; }
+  else { Game.score2+=500; UI.score2.textContent=Game.score2; }
+  updateLeaderHUD();
+  sfxPower();
+  break;
     case 'freeze':
   // immobilise brièvement tout le monde (~3s)
   Game.parasites.forEach(p => { p.frozen = Math.max(p.frozen||0, 180); });
@@ -1526,6 +1551,7 @@ if (p.morilleChaos > 0) {
           Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
           if(p.morilleOwner===1){ Game.score1+=10; UI.score1.textContent=Game.score1; }
           else if(p.morilleOwner===2){ Game.score2+=10; UI.score2.textContent=Game.score2; }
+          updateLeaderHUD();
         }
       }
     }
@@ -1558,6 +1584,7 @@ if (p.morilleChaos > 0) {
           if(Game.grid[gy] && Game.grid[gy][gx]===2){
             Game.grid[gy][gx]=0; Game.remaining--; sfxEat(); refreshPelletCell(gx,gy);
             if(p.servantOwner===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else if(p.servantOwner===2){ Game.score2+=10; UI.score2.textContent=Game.score2; }
+            updateLeaderHUD();
           }
         }
       }
@@ -1661,25 +1688,30 @@ for(let i=Game.vortexBlocks.length-1;i>=0;i--){
   if(Game.vortexBlocks[i].timer<=0) Game.vortexBlocks.splice(i,1);
 }
 
-  // Fin de niveau / match
-  if(Game.remaining<=0){
-    sfxWin();
-    LEVEL_INDEX++;
-    if(LEVEL_INDEX>=Game.levelsToPlay){
-      if(Game.mode==='duo'){
-        if(Game.lives1<0 && Game.lives2>=0) { endMatch('J2 gagne — dernier vivant !'); return; }
-        if(Game.lives2<0 && Game.lives1>=0) { endMatch('J1 gagne — dernier vivant !'); return; }
-        if(Game.score1>Game.score2) endMatch('Fin — J1 gagne au score !');
-        else if(Game.score2>Game.score1) endMatch('Fin — J2 gagne au score !');
-        else endMatch('Fin — Égalité parfaite !');
-      } else {
-        LEVEL_INDEX=0; Game.lives1++; UI.lives1.textContent=Game.lives1;
-        loadLevel(LEVEL_INDEX);
-      }
-    } else {
-      loadLevel(LEVEL_INDEX);
+// Fin de niveau / match
+if (Game.remaining <= 0) {
+  sfxWin();
+  if (Game.mode === 'duo') {
+    const p1Alive = Game.lives1 >= 0;
+    const p2Alive = Game.lives2 >= 0;
+
+    // Les deux vivants -> gagnant au score
+    if (p1Alive && p2Alive) {
+      if (Game.score1 > Game.score2) { endMatch('Fin — J1 gagne au score !'); return; }
+      if (Game.score2 > Game.score1) { endMatch('Fin — J2 gagne au score !'); return; }
+      endMatch('Fin — Égalité parfaite !'); return;
     }
+
+    // Si l’un est déjà mort, le "dernier vivant" a déjà été géré dans playerHit()
+    endMatch('Fin — Partie terminée');
+    return;
   }
+
+  // SOLO : une seule carte -> fin simple
+  endMatch('Victoire !');
+  return;
+}
+
 }
 
 function parasiteHitPlayers(p){
@@ -1901,6 +1933,7 @@ if (pl.species.id==='phalloides' && pl.phase) {
   pl.collectedSpores = (pl.collectedSpores||0) + 1;
     
     if(pl.pid===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else { Game.score2+=10; UI.score2.textContent=Game.score2; }
+    pdateLeaderHUD();
   }
   
   // bonus
