@@ -978,11 +978,10 @@ UI.power1.textContent = '—';
 if (Game.mode === 'duo') UI.power2.textContent = '—';
 
   buildLayers();
-  UI.lvl.textContent=(i+1);
-  UI.score1.textContent=Game.score1; UI.lives1.textContent=Game.lives1; UI.power1.textContent='—';
-  UI.score2.textContent=Game.score2; UI.lives2.textContent=Game.lives2; UI.power2.textContent='—';
-  UI.diff.textContent=SelectedDifficulty.name;
-  Game.paused=true; Game.countdown=0;
+  UI.score1.textContent = Game.score1; UI.lives1.textContent = Game.lives1; UI.power1.textContent = '—';
+  UI.score2.textContent = Game.score2; UI.lives2.textContent = Game.lives2; UI.power2.textContent = '—';
+  UI.diff.textContent = SelectedDifficulty.name;
+  Game.paused = true; Game.countdown = 0;
   updateLeaderHUD();
 }
 
@@ -1933,7 +1932,7 @@ if (pl.species.id==='phalloides' && pl.phase) {
   pl.collectedSpores = (pl.collectedSpores||0) + 1;
     
     if(pl.pid===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else { Game.score2+=10; UI.score2.textContent=Game.score2; }
-    pdateLeaderHUD();
+    updateLeaderHUD();
   }
   
   // bonus
@@ -2230,8 +2229,10 @@ function endMatch(message){
   Game.paused=true; Game.countdown=0;
   const ov=document.createElement('div'); ov.className='ov'; const card=document.createElement('div'); card.className='card'; ov.appendChild(card);
   const t=document.createElement('div'); t.className='title'; t.textContent=message; card.appendChild(t);
-  const sub=document.createElement('div'); sub.className='sub';
-  sub.textContent=`Scores — J1: ${Game.score1} · J2: ${Game.score2}`;
+  const sub = document.createElement('div'); sub.className = 'sub';
+  sub.textContent = (Game.mode === 'duo')
+    ? `Scores — J1: ${Game.score1} · J2: ${Game.score2}`
+    : `Score : ${Game.score1}`;
   card.appendChild(sub);
   const btn=document.createElement('button'); btn.className='btn'; btn.textContent='Rejouer'; btn.addEventListener('click', ()=>{ ov.remove(); openOverlay(); });
   card.appendChild(btn);
