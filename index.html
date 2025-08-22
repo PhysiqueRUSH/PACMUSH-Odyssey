@@ -397,7 +397,7 @@ const Species = [
     id: 'morchella',
     name: 'Morille',
     power: 'Essaim de spores',
-    desc: 'Chaos global, parasites désorientés.',
+    desc: 'Parasites et adversaires désorientés. Le joueur adverse devient fou pendant 5 secondes',
     color: '#6a4f2f',
     draw: drawMorel,
     use: (me) => {
@@ -415,8 +415,20 @@ const Species = [
       });
       // Option visuelle + léger fear local
       spawnSporeCloud(me.x, me.y, radTiles);
+    // === NOUVEAU : en 2J, l’adversaire dans la zone devient incontrôlable 5s (inversion des contrôles)
+    if (Game.mode === 'duo') {
+      const foe = (me.pid === 1) ? Game.p2 : Game.p1;
+      if (foe) {
+        const dist = Math.hypot(foe.x - cx, foe.y - cy);
+        if (dist <= radTiles) {
+          foe.madnessTimer = 300; // 5s @60fps
+          sfxPower();             // petit feedback audio
+          // Option: petit flash de glow pour signaler l’état
+          foe.glowTimer = Math.max(foe.glowTimer||0, 60);
+        }
+      }
     }
-  },
+    },
   
   {
     id: 'phalloides',
@@ -990,7 +1002,7 @@ function makePlayer(tx,ty,pid,species){
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
     respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0, invulnTimer: 0, collectedSpores:0,
-    trumpetCd:0
+    trumpetCd:0, madnessTimer:0
   };
 }
 
@@ -1321,6 +1333,26 @@ function inputDirFor(pid){
   }
   return [0,0];
 }
+
+  function inputDirForPlayer(pl){
+  const inv = !!(pl && pl.madnessTimer > 0);
+
+  if(pl.pid===1){
+    // J1: flèches
+    if(Keys['arrowup'])    return inv ? [0,  1] : [0,-1];
+    if(Keys['arrowdown'])  return inv ? [0, -1] : [0, 1];
+    if(Keys['arrowleft'])  return inv ? [1,  0] : [-1,0];
+    if(Keys['arrowright']) return inv ? [-1, 0] : [1, 0];
+  } else {
+    // J2: ZQSD
+    if(Keys['z']) return inv ? [0,  1] : [0,-1];
+    if(Keys['s']) return inv ? [0, -1] : [0, 1];
+    if(Keys['q']) return inv ? [1,  0] : [-1,0];
+    if(Keys['d']) return inv ? [-1, 0] : [1, 0];
+  }
+  return [0,0];
+}
+
 
 /* Boucle principale */
 let LAST=now();
@@ -1834,6 +1866,7 @@ function updatePlayer(pl, dt){
   if (pl.spinTimer > 0) pl.spinTimer--;
   if (pl.glowTimer > 0) pl.glowTimer--;
   if (pl.invulnTimer > 0) pl.invulnTimer--;
+  if (pl.madnessTimer > 0) pl.madnessTimer--;
   // Spin après téléport : incrémente une phase locale tant que le timer est actif
 if (pl.spinTimer > 0) {
   pl.spinTimer--;
@@ -1866,7 +1899,7 @@ if (pl.spinTimer > 0) {
 if (pl.trumpetCd>0) pl.trumpetCd--;
 
   if (pl.phaseCooldown>0) pl.phaseCooldown--;
-  const want=inputDirFor(pl.pid); if(want[0]||want[1]) pl.nextDir=want.slice(0);
+  const want=inputDirForPlayer(pl); if(want[0]||want[1]) pl.nextDir=want.slice(0);
   const tx=Math.floor(pl.x), ty=Math.floor(pl.y); const cx=tx+0.5, cy=ty+0.5; const TURN_EPS=0.45;
   if(pl.frozenTimer>0){ pl.frozenTimer--; pl.dir=[0,0]; }
   else {
@@ -2130,6 +2163,39 @@ function drawPlayerEntity(pl){
     CTX.restore();
   } else {
     drawMushroomCentered(x, y); // affichage normal
+  }
+
+  // === NOUVEAU : halo/indicateur de folie (inversion contrôles)
+  if (pl.madnessTimer > 0) {
+    const t = performance.now() / 200;
+    const k = (pl.madnessTimer / 300); // fade out léger
+    const R = 22 + 3*Math.sin(t*2.4);
+
+    // Contour magenta animé (zigzag)
+    CTX.save();
+    CTX.translate(x, y);
+    CTX.rotate(Math.sin(t*1.1)*0.15);
+    CTX.beginPath();
+    for (let i=0;i<14;i++){
+      const ang = (i/14)*Math.PI*2;
+      const rr = R + ((i%2) ? 5 : -2);
+      CTX.lineTo(Math.cos(ang)*rr, Math.sin(ang)*rr);
+    }
+    CTX.closePath();
+    CTX.globalAlpha = 0.65*k;
+    CTX.lineWidth = 2;
+    CTX.strokeStyle = 'rgba(200,80,255,0.95)';
+    CTX.stroke();
+    CTX.restore();
+
+    // Icône ✳ flottante
+    CTX.save();
+    CTX.font = '18px system-ui';
+    CTX.textAlign = 'center';
+    CTX.textBaseline = 'middle';
+    CTX.globalAlpha = 0.9*k;
+    CTX.fillText('✳', x, y - 28 - 4*Math.sin(t*2.0));
+    CTX.restore();
   }
 
   // --- Effets supplémentaires ---
