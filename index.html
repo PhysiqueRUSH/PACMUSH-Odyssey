@@ -2382,12 +2382,7 @@ function init(){
     catch (e) { console.error('Préload images a échoué :', e); }
 
     // 3) Overlay de sélection (protégé)
-    try { createOverlay(); }
-    catch (e) {
-      console.error('createOverlay a échoué :', e);
-      // Fallback minimal : tente d’ouvrir via l’API publique
-      try { openOverlay(); } catch(_) {}
-    }
+createOverlay();
 
     // 4) Boucle
     loop();
