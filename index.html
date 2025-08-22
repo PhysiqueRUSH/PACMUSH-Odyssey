@@ -570,17 +570,24 @@ function openOverlay(){
 
 function startGame(){
   if(UI.overlay){ UI.overlay.remove(); UI.overlay=null; }
+
+  // AJOUT : purge défensive des anciens états (si des joueurs existent)
+  if (Game.p1) resetPlayerRuntimeState(Game.p1);
+  if (Game.p2) resetPlayerRuntimeState(Game.p2);
+  UI.power1.textContent = '—';
+  UI.power2.textContent = '—';
+
   ensureAudio();
   Game.started=true;
 
-  // -> Nouveau set de seeds à chaque "Jouer"
   const levels = (Game.mode==='duo') ? MATCH_LEVELS_DUO : MATCH_LEVELS_SOLO;
   reseedSession(levels);
 
-  Game.showStartHint = 240; // ~4s
+  Game.showStartHint = 240;
   resetMatch(true);
   UI.diff.textContent=SelectedDifficulty.name;
 }
+
 
 /* =================== BIOMES, ARBRES (EMOJI) & GÉNÉRATION =================== */
 const BIOMES=[
@@ -909,7 +916,7 @@ const speed = base * SelectedDifficulty.factor;
       state:'wander',lastSeen:null,path:[],
       chaos:false, chaosMode:null, chaosTick:0, chaosTarget:null,
       seedOnce:false, seedCd:0, chaosAte:false,
-      servant:false, servantTime:0, servantOwner:0,
+      servant:false, frozen: 0, servantTime:0, servantOwner:0,
       // knockback
       kbActive:false, kbTx:0, kbTy:0, kbSpeed:0, kbDir:[0,0],
       // confusion (après impact mur)
@@ -959,6 +966,40 @@ function makePlayer(tx,ty,pid,species){
   };
 }
 
+function resetPlayerRuntimeState(pl){
+  if(!pl) return;
+  // états de pouvoir / temps
+  pl.powerTimer = 0;
+  pl.invisible  = false;
+  pl.speedBoost = 1;
+  pl.shield     = false;
+
+  // Phalloïde
+  pl.phase = false;
+  pl.phaseInsideWall = false;
+  pl.phaseCooldown   = 0;
+
+  // Girolle
+  pl.hunterWindow = 0;
+  pl.invulnTimer  = 0;
+
+  // Trompette
+  pl.trumpetCd = 0;
+  pl.trumpetTrapImmune = false;
+  pl.collectedSpores   = 0;   // <<< durée potentielle = 0 s
+
+  // Divers runtime
+  pl.hitGrace = 0;
+  pl.frozenTimer = 0;
+  pl.respawnFlash = 0;
+  pl.spinTimer = 0;
+  pl.spinPhase = 0;
+  pl.glowTimer = 0;
+  pl.tpGrace = 0;
+  pl.nextPowerExtend = 0;
+}
+  
+
 function findOpenTile(){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; for(let t=0;t<4000;t++){ const x=(Math.random()*cols)|0, y=(Math.random()*rows)|0; if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } return {x:1,y:1}; }
 function findOpenTileFarFrom(ref, minD){
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
@@ -981,7 +1022,7 @@ const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
     chaos:false,chaosMode:null,chaosTarget:null,seedOnce:false,seedCd:0,chaosAte:false,
     servant:false,servantTime:0,servantOwner:0,
     kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
-    fleeGirolle:0,
+    fleeGirolle:0, frozen: 0,
     morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null, tpGrace:0,
     confusedTimer:0, avoidVortex: 0  // frames à éviter de repasser sur un vortex
   });
@@ -1189,7 +1230,10 @@ function eatBonusFor(player,b){
       if(player.pid===1){ Game.score1+=500; UI.score1.textContent=Game.score1; } else { Game.score2+=500; UI.score2.textContent=Game.score2; }
       sfxPower(); break;
     case 'freeze':
-      Game.parasites.forEach(p=>{ p.scared=300; }); sfxPower(); break;
+  // immobilise brièvement tout le monde (~3s)
+  Game.parasites.forEach(p => { p.frozen = Math.max(p.frozen||0, 180); });
+  sfxPower();
+  break;
   }
 }
 function refreshPelletCell(x,y){ if(!Game.pelletsLayer) return; const pctx=Game.pelletsLayer.getContext('2d'); pctx.clearRect(x*TILE,y*TILE,TILE,TILE); }
@@ -1242,6 +1286,14 @@ function update(dt){
   Game.parasites.forEach((p,idx)=>{
     if (p.tpGrace>0) p.tpGrace--;
     if (p.avoidVortex>0) p.avoidVortex--;
+    // --- Gel global (freeze bonus) : immobile mais toujours dangereux si on le touche
+if (p.frozen > 0) {
+  p.frozen--;
+  // pas de déplacement ni d'IA, mais on conserve le check de collision:
+  parasiteHitPlayers(p);
+  return;
+}
+
     // ---------- Knockback prioritaire + effet domino ----------
     if(p.kbActive){
       const dx = p.kbTx - p.x;
@@ -1666,11 +1718,27 @@ function playerHit(pl, hitter){
   }
 
   // Solo : reset complet si vies < 0
-  if((pl.pid===1?Game.lives1:Game.lives2)<0){
-    Game.lives1=3; Game.score1=0; LEVEL_INDEX=0; UI.lives1.textContent=Game.lives1; UI.score1.textContent=Game.score1;
-    loadLevel(LEVEL_INDEX);
-    return;
-  }
+if ((pl.pid===1 ? Game.lives1 : Game.lives2) < 0) {
+  // Remise à zéro des états volatils des joueurs (garantit 0s d’invisibilité Trompette)
+  if (Game.p1) resetPlayerRuntimeState(Game.p1);
+  if (Game.p2) resetPlayerRuntimeState(Game.p2); // (au cas où p2 existe, même en solo c’est inoffensif)
+
+  // Nettoie l’affichage des pouvoirs
+  UI.power1.textContent = '—';
+  UI.power2.textContent = '—';
+
+  // Reset score/vies/niveau SOLO
+  Game.lives1 = 3;
+  Game.score1 = 0;
+  LEVEL_INDEX = 0;
+  UI.lives1.textContent = Game.lives1;
+  UI.score1.textContent = Game.score1;
+
+  // Recharge le niveau 1 (tout est sain)
+  loadLevel(LEVEL_INDEX);
+  return;
+}
+
 
   // Réapparition immédiate + flash 5s
   const s=findOpenTile(); pl.x=s.x+0.5; pl.y=s.y+0.5; pl.dir=[0,0];
@@ -1833,6 +1901,15 @@ function draw(){
       CTX.arc(p.x*TILE, p.y*TILE, 8, 0, Math.PI*2); CTX.fill();
       CTX.restore();
     }
+    if (p.frozen > 0) {
+  CTX.save();
+  CTX.globalAlpha = 0.35;
+  CTX.fillStyle = '#9ad6ff';
+  CTX.beginPath();
+  CTX.arc(p.x*TILE, p.y*TILE, 12, 0, Math.PI*2);
+  CTX.fill();
+  CTX.restore();
+}
   });
 
   if(Game.p1) drawPlayerEntity(Game.p1);
@@ -1985,36 +2062,36 @@ function drawPlayerEntity(pl){
     CTX.beginPath(); CTX.arc(x, y, 16, 0, Math.PI*2); CTX.fill(); CTX.restore();
   }
 
-  if (pl.powerTimer > 0) {
+if (pl.powerTimer > 0) {
   if (pl.species.id === 'cornucopioides' && pl.invisible) {
-    // --- Halo noir épais, pulsant, façon encre ---
+    // --- Halo noir encre, moins opaque, placé DERRIÈRE le sprite ---
     const t = performance.now();
     const baseR = 22;
     const pulse = 4 * Math.sin(t / 180);
     const R = baseR + pulse;
 
-    // Dégradé radial noir -> transparent
-    const g = CTX.createRadialGradient(x, y, R * 0.15, x, y, R * 1.3);
-    g.addColorStop(0.00, 'rgba(0,0,0,0.90)');
-    g.addColorStop(0.55, 'rgba(0,0,0,0.70)');
+    // Dégradé radial plus léger : silhouette visible
+    const g = CTX.createRadialGradient(x, y, R * 0.15, x, y, R * 1.25);
+    g.addColorStop(0.00, 'rgba(0,0,0,0.58)');
+    g.addColorStop(0.50, 'rgba(0,0,0,0.42)');
     g.addColorStop(1.00, 'rgba(0,0,0,0.00)');
 
     CTX.save();
-    // Multiplie légèrement l’assombrissement pour un rendu « encre »
-    CTX.globalCompositeOperation = 'multiply';
+    // place le halo derrière ce qui est déjà dessiné (la Trompette)
+    CTX.globalCompositeOperation = 'destination-over';
     CTX.fillStyle = g;
     CTX.beginPath();
-    CTX.arc(x, y, R * 1.25, 0, Math.PI * 2);
+    CTX.arc(x, y, R * 1.15, 0, Math.PI * 2);
     CTX.fill();
 
-    // Petites « taches » qui tournent doucement pour l’organique
+    // petites nappes/taches discrètes
     for (let i = 0; i < 4; i++) {
       const ang = (t / 520) + i * (Math.PI / 2);
       const ox = Math.cos(ang) * 6;
       const oy = Math.sin(ang) * 4;
-      const r2 = R * 0.55;
+      const r2 = R * 0.5;
       const g2 = CTX.createRadialGradient(x+ox, y+oy, r2 * 0.1, x+ox, y+oy, r2);
-      g2.addColorStop(0.00, 'rgba(0,0,0,0.80)');
+      g2.addColorStop(0.00, 'rgba(0,0,0,0.48)');
       g2.addColorStop(1.00, 'rgba(0,0,0,0.00)');
       CTX.beginPath();
       CTX.fillStyle = g2;
@@ -2023,13 +2100,12 @@ function drawPlayerEntity(pl){
     }
     CTX.restore();
 
-    // --- Compte à rebours en secondes, minuscule, blanc, lisible ---
+    // Compte à rebours (secondes) — minuscule blanc
     const secs = Math.max(0, Math.ceil(pl.powerTimer / 60));
     CTX.save();
     CTX.font = '10px system-ui';
     CTX.textAlign = 'center';
     CTX.textBaseline = 'middle';
-    // Liseré noir pour la lisibilité dans l’encre animée
     CTX.lineWidth = 3;
     CTX.strokeStyle = 'rgba(0,0,0,0.85)';
     CTX.strokeText(String(secs), x, y);
@@ -2037,7 +2113,7 @@ function drawPlayerEntity(pl){
     CTX.fillText(String(secs), x, y);
     CTX.restore();
   } else {
-    // Aura par défaut pour les autres pouvoirs
+    // autres pouvoirs : garde ton effet existant OU mets rien si tu ne veux plus de cercle
     const r = 12 + (Math.sin(performance.now() / 120) + 1) * 6;
     CTX.beginPath(); CTX.arc(x, y, r, 0, Math.PI * 2);
     CTX.lineWidth = 2; CTX.strokeStyle = 'rgba(255,255,255,0.55)'; CTX.stroke();
