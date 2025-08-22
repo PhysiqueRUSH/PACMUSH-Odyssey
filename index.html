@@ -137,6 +137,16 @@ function loadImg(src){
   return i;
 }
 
+function preloadCoreImages(){
+  const list = [
+    'sol_foret.png',
+    TREE_PNG.chene, TREE_PNG.pin,
+    ...Object.values(SPRITES_BY_SPECIES).flatMap(v => [v.game, v.ui])
+  ];
+  list.forEach(src => loadImg(src));
+}
+  
+
 // --- ARBRES PNG (à la racine du projet, sinon ajuste les chemins) ---
 const TREE_PNG = {
   chene: 'chene.png',
@@ -920,6 +930,7 @@ function loadLevel(i,first=false){
   BIOME=BIOMES[i%BIOMES.length];
 const seed = (SESSION_SEEDS[i] ?? ((Math.random()*1e9)|0)) + (i*101);
 Game.grid = genLevel(seed);
+  placeVortexes();
   Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
   Game.muscariaTrap1=null; Game.muscariaTrap2=null; Game.remaining=0;
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
@@ -937,8 +948,6 @@ Game.grid = genLevel(seed);
     }
   }
 
-  placeVortexes();
-  
   const count= (6+Math.floor(i*0.8));
   for(let k=0;k<count;k++){
     const pos=findOpenTile();
@@ -990,46 +999,6 @@ if (Game.mode === 'duo' && Game.p2) resetPlayerTransientForNewLevel(Game.p2);
 UI.power1.textContent = '—';
 if (Game.mode === 'duo') UI.power2.textContent = '—';
 
-// Construit le calque "sol" à partir de l'image 1024×1024
-function buildFloorLayer(){
-  const floor = makeLayerCanvas(W, H);
-  const fctx = floor.getContext('2d');
-  const img = loadImg('sol_foret.png'); // image à la racine
-
-  const draw = () => {
-    const pat = fctx.createPattern(img, 'repeat');
-    fctx.fillStyle = pat;
-
-    // Option "précise" : ne texturer que les cases non-mur (v != 1)
-    const dm = gridDims();
-    for (let y = 0; y < dm.rows; y++){
-      for (let x = 0; x < dm.cols; x++){
-        const v = Game.grid[y][x];
-        if (v !== 1) {
-          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-        }
-      }
-    }
-
-    // Léger assombrissement pour garder une bonne lisibilité
-    fctx.fillStyle = 'rgba(0,0,0,0.08)';
-    for (let y = 0; y < dm.rows; y++){
-      for (let x = 0; x < dm.cols; x++){
-        const v = Game.grid[y][x];
-        if (v !== 1) {
-          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-        }
-      }
-    }
-
-    Game.floorLayer = floor;
-  };
-
-  if (img.complete) draw();
-  else img.addEventListener('load', draw, { once:true });
-}
-
-  
   buildLayers();
   UI.score1.textContent = Game.score1; UI.lives1.textContent = Game.lives1; UI.power1.textContent = '—';
   UI.score2.textContent = Game.score2; UI.lives2.textContent = Game.lives2; UI.power2.textContent = '—';
@@ -1207,6 +1176,47 @@ function computeKnockbackTargetDir(origin, dir){
   return { x:lastX, y:lastY };
 }
 
+// Construit le calque "sol" à partir de l'image 1024×1024
+function buildFloorLayer(){
+  const floor = makeLayerCanvas(W, H);
+  const fctx = floor.getContext('2d');
+  const img = loadImg('sol_foret.png'); // image à la racine
+
+  const draw = () => {
+    const pat = fctx.createPattern(img, 'repeat');
+    fctx.fillStyle = pat;
+
+    // Option "précise" : ne texturer que les cases non-mur (v != 1)
+    const dm = gridDims();
+    for (let y = 0; y < dm.rows; y++){
+      for (let x = 0; x < dm.cols; x++){
+        const v = Game.grid[y][x];
+        if (v !== 1) {
+          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        }
+      }
+    }
+
+    // Léger assombrissement pour garder une bonne lisibilité
+    fctx.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let y = 0; y < dm.rows; y++){
+      for (let x = 0; x < dm.cols; x++){
+        const v = Game.grid[y][x];
+        if (v !== 1) {
+          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        }
+      }
+    }
+
+    Game.floorLayer = floor;
+  };
+
+  if (img.complete) draw();
+  else img.addEventListener('load', draw, { once:true });
+}
+
+  
+  
 /* Couches graphiques */
 function buildLayers(){
   const theme=makeLayerCanvas(W,H), tctx=theme.getContext('2d');
@@ -2359,7 +2369,7 @@ function endMatch(message){
   console.assert(typeof findNearestPellet==='function','nearest pellet helper');
 } catch(e){ console.error('Self-tests failed',e); }})();
 
-function init(){ createOverlay(); loop(); }
+function init(){preloadCoreImages(); createOverlay(); loop(); }
 if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); } else { init(); }
 
 /* =================== FIN =================== */
