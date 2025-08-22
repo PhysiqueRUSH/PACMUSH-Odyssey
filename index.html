@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>PACMUSH ODYSSEY — MushRush Maze (Solo & 2 Joueurs)</title>
+<title>PACMUSH ODYSSEY</title>
 <style>
   :root { --bg:#0b0a0e; --card:#16131b; --pill:#1b141e; --line:#ffffff22; --shadow:#00000055; --text:#fff7ea; }
   html,body{height:100%}
@@ -558,7 +558,7 @@ function createOverlay(){
   const ov=document.createElement('div'); ov.className='ov'; ov.id='overlay'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.tabIndex=0;
   const card=document.createElement('div'); card.className='card'; ov.appendChild(card);
 
-  const title=document.createElement('div'); title.className='title'; title.textContent='PACMUSH ODYSSEY — MushRush 🍄';
+  const title=document.createElement('div'); title.className='title'; title.textContent='🍄 PACMUSH ODYSSEY 🍄';
   const sub=document.createElement('div'); sub.className='sub'; sub.textContent='Choisis le mode, la difficulté et vos champignons (en 2J : espèces différentes).';
 
   // Mode
@@ -1009,7 +1009,15 @@ if (Game.mode === 'duo') UI.power2.textContent = '—';
 }
 
 function makePlayer(tx,ty,pid,species){
-  return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
+  return {
+    pid, species,
+    x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0],
+    // vitesses
+    baseSpeed: 0.11,   // ← vitesse de référence
+    speed: 0.11,       // ← vitesse courante (calculée)
+    speedBuffs: 0,     // ← nb de buffs "speed" actifs en parallèle
+
+    size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
     respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0, invulnTimer: 0, collectedSpores:0,
@@ -1049,6 +1057,8 @@ function resetPlayerTransientForNewLevel(pl){
   pl.glowTimer = 0;
   pl.tpGrace = 0;
   pl.nextPowerExtend = 0;
+  pl.speedBuffs = 0;
+  pl.speed = pl.baseSpeed;
 
   // IMPORTANT : on NE remet PAS pl.collectedSpores ici
 }
@@ -1085,6 +1095,8 @@ function resetPlayerRuntimeState(pl){
   pl.glowTimer = 0;
   pl.tpGrace = 0;
   pl.nextPowerExtend = 0;
+  pl.speedBuffs = 0;
+  pl.speed = pl.baseSpeed;
 }
   
 
@@ -1381,8 +1393,29 @@ function eatBonusFor(player,b){
     case 'life':
       if(player.pid===1){ Game.lives1++; UI.lives1.textContent=Game.lives1; } else { Game.lives2++; UI.lives2.textContent=Game.lives2; }
       sfxLife(); break;
-    case 'speed':
-      player.speed*=1.4; setTimeout(()=>{ player.speed/=1.4; },6000); sfxPower(); break;
+ case 'speed': {
+  const mult = 1.4;   // même multiplicateur qu'avant
+  const dur  = 6000;  // 6 s comme avant
+
+  // Lazy init pour un patch minimal (aucune autre modif requise ailleurs)
+  if (player.baseSpeed == null) player.baseSpeed = player.speed || 0.11;
+  if (player.speedBuffs == null) player.speedBuffs = 0;
+
+  // On ajoute un buff et on recalcule à partir de la base (pas de divisions en cascade)
+  player.speedBuffs += 1;
+  player.speed = player.baseSpeed * Math.pow(mult, player.speedBuffs);
+  sfxPower();
+
+  // À l'expiration, on décrémente et on recalcule proprement
+  setTimeout(() => {
+    // garde-fou si le joueur a été réinitialisé entre-temps
+    player.speedBuffs = Math.max(0, (player.speedBuffs || 0) - 1);
+    player.speed = player.baseSpeed * Math.pow(mult, player.speedBuffs);
+  }, dur);
+
+  break;
+}
+
     case 'power':
       player.nextPowerExtend=(player.nextPowerExtend||0)+120; // +2s
       (player.pid===1?UI.power1:UI.power2).textContent='★ prêt (+2s)'; sfxPower();
