@@ -2369,8 +2369,36 @@ function endMatch(message){
   console.assert(typeof findNearestPellet==='function','nearest pellet helper');
 } catch(e){ console.error('Self-tests failed',e); }})();
 
-function init(){preloadCoreImages(); createOverlay(); loop(); }
-if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); } else { init(); }
+function init(){
+  try {
+    // 1) Vérifs canvas/contexte
+    const c = document.getElementById('game');
+    if (!c) throw new Error('Canvas #game introuvable.');
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new Error('Impossible d’obtenir le contexte 2D du canvas.');
+
+    // 2) Pré-chargement images (protégé)
+    try { preloadCoreImages(); } 
+    catch (e) { console.error('Préload images a échoué :', e); }
+
+    // 3) Overlay de sélection (protégé)
+    try { createOverlay(); }
+    catch (e) {
+      console.error('createOverlay a échoué :', e);
+      // Fallback minimal : tente d’ouvrir via l’API publique
+      try { openOverlay(); } catch(_) {}
+    }
+
+    // 4) Boucle
+    loop();
+  } catch (e) {
+    console.error('Init jeu a échoué :', e);
+    alert("Une erreur a empêché l’ouverture du menu.\nRegarde la console pour le détail (F12).");
+  }
+}
+
+// Lance toujours via DOMContentLoaded pour éviter toute course.
+document.addEventListener('DOMContentLoaded', init);
 
 /* =================== FIN =================== */
 </script>
