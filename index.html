@@ -402,7 +402,7 @@ const Species = [
     draw: drawMorel,
     use: (me) => {
       me.powerTimer = 600; // 10s d'aura
-      const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
+      const radTiles = Math.max(1, Math.floor(0.20 * Math.max(COLS, ROWS)));
       const cx = me.x, cy = me.y;
 
       Game.parasites.forEach(p => {
