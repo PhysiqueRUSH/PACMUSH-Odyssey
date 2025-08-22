@@ -195,6 +195,9 @@ function triggerPower(pid){
  if (pl.powerTimer<=0) {
   // phalloides: bloque si cooldown actif
   if (pl.species.id==='phalloides' && pl.phaseCooldown>0) return;
+   // Trompette : cooldown 10s après la fin d'un voile
+  if (pl.species.id==='cornucopioides' && pl.trumpetCd>0) return;
+   
   pl.species.use(pl);
   if(pl.nextPowerExtend && pl.nextPowerExtend>0){ pl.powerTimer+=pl.nextPowerExtend; pl.nextPowerExtend=0; }
   (pid===1?UI.power1:UI.power2).textContent=pl.species.power; sfxPower();
@@ -299,29 +302,34 @@ function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind,isConfused){
 
 /* ============ Espèces & pouvoirs ============ */
 const Species = [
-  {
-    id: 'cornucopioides',
-    name: "Trompette de la mort",
-    power: "Voile total (10s)",
-    desc: "Invisible, parasites aveugles & lents, immunisée aux pièges 10s.",
-    color: '#3d3630',
-    draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
-    use: (me) => {
-      me.powerTimer = 600;          // ~10s
-      me.invisible  = true;
-      me.trumpetTrapImmune = true;
+{
+  id: 'cornucopioides',
+  name: "Trompette de la mort",
+  power: "Voile d'ombre",
+  desc: "Devient invisible. Plus elle a dévoré de spores, plus ce pouvoir dure longtemps.",
+  color: '#3d3630',
+  draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
+  use: (me) => {
+    // Durée dynamique : 1 seconde par tranche de 5 spores collectées
+    const sec = Math.floor((me.collectedSpores || 0) / 5);
+    const frames = sec * 60;
 
-      const radTiles = Math.max(1, Math.floor(0.15 * Math.max(COLS, ROWS)));
-      const cx = me.x, cy = me.y;
-
-      Game.parasites.forEach(p => {
-        const dx = p.x - cx, dy = p.y - cy;
-        if (Math.hypot(dx,dy) <= radTiles) {
-          p.blind = Math.max(p.blind, 600); // aveugle 10s
-        }
-      });
+    // Si 0 spore → aucun effet (on ne lance pas le pouvoir)
+    if (frames <= 0) {
+      (me.pid===1 ? UI.power1 : UI.power2).textContent = '—';
+      return;
     }
-  },
+
+    // Activation du voile : invisibilité, vitesse réduite, pas d’immunité pièges
+    me.powerTimer = frames;
+    me.invisible  = true;    // indétectable pour l’IA
+    me.speedBoost = 0.5;     // -50% de vitesse
+    me.trumpetTrapImmune = false; // plus d’immunité aux pièges
+
+    // Pas d'aveuglement des parasites
+  }
+},
+
   {
     id: 'muscaria',
     name: 'Amanite tue-mouches',
@@ -336,6 +344,7 @@ const Species = [
       me.powerTimer = 120;
     }
   },
+  
   {
     id: 'cibarius',
     name: 'Girolle',
@@ -353,6 +362,7 @@ const Species = [
       Game.parasites.forEach(p => { p.fleeGirolle = me.hunterWindow; });
     }
   },
+  
   {
     id: 'edulis',
     name: 'Cèpe',
@@ -362,6 +372,7 @@ const Species = [
     draw: drawCep,
     use: (me) => { me.powerTimer=360; me.shield=true; }
   },
+  
   {
     id: 'morchella',
     name: 'Morille',
@@ -386,6 +397,7 @@ const Species = [
       spawnSporeCloud(me.x, me.y, radTiles);
     }
   },
+  
   {
     id: 'phalloides',
     name: 'Amanite phalloïde',
@@ -725,7 +737,8 @@ const Game={
   levelsToPlay: MATCH_LEVELS_SOLO,
   girollePanic:{active:false, ownerPid:0},
   showStartHint: 0,
-  themeLayer:null, wallsLayer:null, pelletsLayer:null
+  themeLayer:null, wallsLayer:null, pelletsLayer:null,
+  vortexBlocks:[]
 };
 
 function gridDims(){ const rows=Array.isArray(Game.grid)?Game.grid.length:0; const cols=rows>0 && Array.isArray(Game.grid[0])?Game.grid[0].length:0; return {cols,rows}; }
@@ -814,7 +827,10 @@ function teleportEntityToOtherVortex(entity, fromGX, fromGY){
   if(fromIdx<0) fromIdx = 0;
   const toIdx = randomOtherVortexIndex(fromIdx);
   const target = Game.vortexes[toIdx];
-
+  
+// Blocus 5s du vortex d'arrivée
+addVortexBlock(target.x, target.y, 300);
+  
   entity.x = target.x + 0.5;
   entity.y = target.y + 0.5;
   entity.dir = [0,0];
@@ -938,7 +954,8 @@ function makePlayer(tx,ty,pid,species){
   return { pid, species, x:tx+0.5, y:ty+0.5, dir:[0,0], nextDir:[0,0], speed:0.11, size:0.9,
     powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
-    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0, invulnTimer: 0
+    respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0, invulnTimer: 0, collectedSpores:0,
+    trumpetCd:0
   };
 }
 
@@ -1076,11 +1093,27 @@ function drawPellet(ctx,x,y){ const px=x*TILE+TILE/2, py=y*TILE+TILE/2; ctx.fill
 
 /* =================== IA, GAMEPLAY & RENDU =================== */
 function dims(){ const dm=gridDims(); return {C:dm.cols,R:dm.rows}; }
-function openTile(tx,ty,pl){ const d=dims(); if(!Game.grid||ty<0||tx<0||ty>=d.R||tx>=d.C) return false; const v=Game.grid[ty][tx]; if(v===1){ if(pl&&pl.phase){ if(tx===0||ty===0||tx===d.C-1||ty===d.R-1) return false; return true; } return false; } return true; }
-function isWalkable(tx,ty){ const d=dims(); if(tx<0||ty<0||tx>=d.C||ty>=d.R) return false; return Game.grid[ty][tx]!==1; }
+function openTile(tx,ty,pl){ const d=dims(); if(!Game.grid||ty<0||tx<0||ty>=d.R||tx>=d.C) return false; const v=Game.grid[ty][tx]; if(v===1){ if(pl&&pl.phase){ if(tx===0||ty===0||tx===d.C-1||ty===d.R-1) return false; return true; } return false; } if(v===VORTEX && isVortexBlocked(tx,ty)) return false; return true; }
+function isWalkable(tx,ty){
+  const d=dims();
+  if(tx<0||ty<0||tx>=d.C||ty>=d.R) return false;
+  const v = Game.grid[ty][tx];
+  if(v===1) return false;
+  if(v===VORTEX && isVortexBlocked(tx,ty)) return false;
+  return true;
+}
 function neighbors(tx,ty){ return [[1,0],[-1,0],[0,1],[0,-1]].map(d=>[tx+d[0],ty+d[1]]).filter(p=>isWalkable(p[0],p[1])); }
 function isVortex(tx, ty){
   return !!(Game.grid[ty] && Game.grid[ty][tx] === VORTEX);
+}
+function isVortexBlocked(tx, ty){
+  return Game.vortexBlocks.some(b => b.x===tx && b.y===ty && b.timer>0);
+}
+function addVortexBlock(tx, ty, frames=300){
+  // remplace si déjà présent
+  const i = Game.vortexBlocks.findIndex(b=>b.x===tx && b.y===ty);
+  if(i>=0) Game.vortexBlocks[i].timer = Math.max(Game.vortexBlocks[i].timer, frames);
+  else Game.vortexBlocks.push({x:tx, y:ty, timer:frames});
 }
 function isWalkableForParasite(tx, ty){
   // Un parasite considère un vortex comme “mur mou” pour l’itinéraire
@@ -1275,7 +1308,7 @@ function update(dt){
     const eTile=[Math.max(0,Math.floor(p.x)), Math.max(0,Math.floor(p.y))];
 
 // --- VORTEX : téléportation parasite ---
-if (Game.grid[eTile[1]] && Game.grid[eTile[1]][eTile[0]] === VORTEX) {
+if (Game.grid[eTile[1]] && Game.grid[eTile[1]][eTile[0]] === VORTEX && !isVortexBlocked(eTile[0], eTile[1])) {
   if (!p.kbActive && p.tpGrace<=0) {
     teleportEntityToOtherVortex(p, eTile[0], eTile[1]);
     p.path=[]; p.lastSeen=null; // reset chemin
@@ -1526,6 +1559,12 @@ if (!p.path || p.path.length === 0) {
     if(pa.type==='cloud'){ pa.r+=2*dt; pa.life-=1*dt; if(pa.life<=0) Game.particles.splice(i,1); }
   }
 
+// Vortex blocks timers
+for(let i=Game.vortexBlocks.length-1;i>=0;i--){
+  Game.vortexBlocks[i].timer -= 1*dt;
+  if(Game.vortexBlocks[i].timer<=0) Game.vortexBlocks.splice(i,1);
+}
+
   // Fin de niveau / match
   if(Game.remaining<=0){
     sfxWin();
@@ -1585,20 +1624,6 @@ function playerHit(pl, hitter){
       return; // aucune perte de vie
     }
   }
-
-
-// Trompette : pendant le pouvoir, toucher un parasite le tue
-//if (pl.species.id === 'cornucopioides' && pl.powerTimer > 0 && hitter) {
-  //const idx = Game.parasites.indexOf(hitter);
-  //if (idx >= 0) {
-    //Game.parasites.splice(idx,1);
-    // (Option) score :
-  //  if (pl.pid===1){ Game.score1+=50; UI.score1.textContent=Game.score1; }
- //   else { Game.score2+=50; UI.score2.textContent=Game.score2; }
-   // sfxPower();
-  //}
- //return; // aucun dégât sur la Trompette
-//}
 
   if(pl.invisible) return;
   if(pl.hitGrace>0) return;
@@ -1680,14 +1705,23 @@ if (pl.spinTimer > 0) {
   Game.girollePanic.active = false;
   Game.parasites.forEach(q => { q.fleeGirolle = 0; });
 }
-  if(pl.powerTimer>0){
-    pl.powerTimer--;
-    if(pl.powerTimer<=0){
-      pl.invisible=false; pl.speedBoost=1; pl.shield=false; pl.phase=false;
-      pl.girolleTrapImmune=false; pl.trumpetTrapImmune=false;
-      (pl.pid===1?UI.power1:UI.power2).textContent='—';
+ if(pl.powerTimer>0){
+  pl.powerTimer--;
+  if(pl.powerTimer<=0){
+    // extinction de l'effet quel que soit le champignon
+    pl.invisible=false; pl.speedBoost=1; pl.shield=false; pl.phase=false;
+    pl.girolleTrapImmune=false; pl.trumpetTrapImmune=false;
+    (pl.pid===1?UI.power1:UI.power2).textContent='—';
+
+    // ← AJOUT : Trompette -> cooldown 10s une fois visible
+    if (pl.species.id==='cornucopioides') {
+      pl.trumpetCd = 600; // 10 s
     }
   }
+}
+// décrémenter le cooldown Trompette s'il existe
+if (pl.trumpetCd>0) pl.trumpetCd--;
+
   if (pl.phaseCooldown>0) pl.phaseCooldown--;
   const want=inputDirFor(pl.pid); if(want[0]||want[1]) pl.nextDir=want.slice(0);
   const tx=Math.floor(pl.x), ty=Math.floor(pl.y); const cx=tx+0.5, cy=ty+0.5; const TURN_EPS=0.45;
@@ -1725,7 +1759,7 @@ const spd = pl.speed * spdMul * dt;
   const ntX=Math.floor(pl.x), ntY=Math.floor(pl.y);
 
 // --- VORTEX : téléportation joueur ---
-if (Game.grid[ntY] && Game.grid[ntY][ntX] === VORTEX) {
+if (Game.grid[ntY] && Game.grid[ntY][ntX] === VORTEX && !isVortexBlocked(ntX, ntY)) {
   if (pl.tpGrace<=0) {
     teleportEntityToOtherVortex(pl, ntX, ntY);
     sfxPower(); // petit son optionnel
@@ -1751,6 +1785,9 @@ if (pl.species.id==='phalloides' && pl.phase) {
 
   if(Game.grid[ntY] && Game.grid[ntY][ntX]===2){
     Game.grid[ntY][ntX]=0; Game.remaining--; sfxEat(); refreshPelletCell(ntX,ntY);
+      // ← AJOUT : compteur de spores pour la durée du pouvoir Trompette
+  pl.collectedSpores = (pl.collectedSpores||0) + 1;
+    
     if(pl.pid===1){ Game.score1+=10; UI.score1.textContent=Game.score1; } else { Game.score2+=10; UI.score2.textContent=Game.score2; }
   }
   
