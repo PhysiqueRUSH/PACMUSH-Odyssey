@@ -1184,30 +1184,10 @@ function buildFloorLayer(){
   const img = loadImg('sol_foret.png'); // image à la racine
 
   const draw = () => {
+    // Motif répété sur TOUT le canvas, y compris sous les murs
     const pat = fctx.createPattern(img, 'repeat');
     fctx.fillStyle = pat;
-
-    // Option "précise" : ne texturer que les cases non-mur (v != 1)
-    const dm = gridDims();
-    for (let y = 0; y < dm.rows; y++){
-      for (let x = 0; x < dm.cols; x++){
-        const v = Game.grid[y][x];
-        if (v !== 1) {
-          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-        }
-      }
-    }
-
-    // Léger assombrissement pour garder une bonne lisibilité
-    fctx.fillStyle = 'rgba(0,0,0,0.08)';
-    for (let y = 0; y < dm.rows; y++){
-      for (let x = 0; x < dm.cols; x++){
-        const v = Game.grid[y][x];
-        if (v !== 1) {
-          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-        }
-      }
-    }
+    fctx.fillRect(0, 0, W, H);
 
     Game.floorLayer = floor;
   };
