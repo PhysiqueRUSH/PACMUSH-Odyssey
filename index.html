@@ -777,6 +777,7 @@ const Game={
   girollePanic:{active:false, ownerPid:0},
   showStartHint: 0,
   themeLayer:null, wallsLayer:null, pelletsLayer:null,
+  floorLayer:null,
   vortexBlocks:[]
 };
 
@@ -989,6 +990,46 @@ if (Game.mode === 'duo' && Game.p2) resetPlayerTransientForNewLevel(Game.p2);
 UI.power1.textContent = '—';
 if (Game.mode === 'duo') UI.power2.textContent = '—';
 
+// Construit le calque "sol" à partir de l'image 1024×1024
+function buildFloorLayer(){
+  const floor = makeLayerCanvas(W, H);
+  const fctx = floor.getContext('2d');
+  const img = loadImg('sol_foret.png'); // image à la racine
+
+  const draw = () => {
+    const pat = fctx.createPattern(img, 'repeat');
+    fctx.fillStyle = pat;
+
+    // Option "précise" : ne texturer que les cases non-mur (v != 1)
+    const dm = gridDims();
+    for (let y = 0; y < dm.rows; y++){
+      for (let x = 0; x < dm.cols; x++){
+        const v = Game.grid[y][x];
+        if (v !== 1) {
+          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        }
+      }
+    }
+
+    // Léger assombrissement pour garder une bonne lisibilité
+    fctx.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let y = 0; y < dm.rows; y++){
+      for (let x = 0; x < dm.cols; x++){
+        const v = Game.grid[y][x];
+        if (v !== 1) {
+          fctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        }
+      }
+    }
+
+    Game.floorLayer = floor;
+  };
+
+  if (img.complete) draw();
+  else img.addEventListener('load', draw, { once:true });
+}
+
+  
   buildLayers();
   UI.score1.textContent = Game.score1; UI.lives1.textContent = Game.lives1; UI.power1.textContent = '—';
   UI.score2.textContent = Game.score2; UI.lives2.textContent = Game.lives2; UI.power2.textContent = '—';
@@ -1173,14 +1214,15 @@ function buildLayers(){
   tctx.fillStyle=g; tctx.fillRect(0,0,W,H);
   for(let i=0;i<60;i++){ tctx.globalAlpha=0.08; tctx.beginPath(); tctx.arc(Math.random()*W,Math.random()*H,10+Math.random()*30,0,6.28); tctx.fillStyle=BIOME.fog; tctx.fill(); }
   Game.themeLayer=theme;
-
-  const walls=makeLayerCanvas(W,H), wctx=walls.getContext('2d');
+ // ← AJOUT : sol texturé
+  buildFloorLayer();
+ const walls=makeLayerCanvas(W,H), wctx=walls.getContext('2d');
   const pellets=makeLayerCanvas(W,H), pctx=pellets.getContext('2d');
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
   for(let y=0;y<rows;y++){
     const row=Game.grid[y];
     for(let x=0;x<cols;x++){
-      if(row[x]===1) drawWallCell(wctx,x,y);    // <-- murs + emoji
+      if(row[x]===1) drawWallCell(wctx,x,y);    // murs arbres (au premier plan)
       if(row[x]===2) drawPellet(pctx,x,y);
     }
   }
@@ -1992,6 +2034,9 @@ function draw(){
     const g=CTX.createLinearGradient(0,0,0,H); g.addColorStop(0,'#1a1620'); g.addColorStop(1,'#0d0a12'); CTX.fillStyle=g; CTX.fillRect(0,0,W,H); return;
   }
   CTX.drawImage(Game.themeLayer,0,0);
+    // ← AJOUT : sol sous tout le gameplay
+  if (Game.floorLayer) CTX.drawImage(Game.floorLayer,0,0);
+
   CTX.drawImage(Game.pelletsLayer,0,0);
   drawTrapsAndBonuses();
   CTX.drawImage(Game.wallsLayer,0,0);
