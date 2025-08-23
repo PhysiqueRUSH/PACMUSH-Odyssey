@@ -3119,6 +3119,46 @@ function updatePlayer(pl, dt){
   }
 }
 
+// === GLOBAL ===
+function drawPreStartBeacons(){
+  const drawOne = (pl, label) => {
+    if(!pl) return;
+    const x = pl.x * TILE, y = pl.y * TILE;
+    const t = performance.now() / 1000;
+
+    // halo pulsant
+    const r = 22 + 6*Math.sin(t*2.1);
+    const g = CTX.createRadialGradient(x, y, r*0.25, x, y, r*1.1);
+    g.addColorStop(0.00, 'rgba(255,240,180,0.70)');
+    g.addColorStop(0.55, 'rgba(255,210,100,0.28)');
+    g.addColorStop(1.00, 'rgba(255,210,100,0.00)');
+
+    CTX.save();
+    CTX.globalCompositeOperation = 'screen';
+    CTX.fillStyle = g;
+    CTX.beginPath(); CTX.arc(x, y, r*1.1, 0, Math.PI*2); CTX.fill();
+
+    // liseré
+    CTX.globalCompositeOperation = 'source-over';
+    CTX.lineWidth = 2;
+    CTX.strokeStyle = 'rgba(255,230,150,0.9)';
+    CTX.beginPath(); CTX.arc(x, y, r + 6, 0, Math.PI*2); CTX.stroke();
+
+    // label J1/J2
+    CTX.font = 'bold 12px system-ui';
+    CTX.textAlign = 'center';
+    CTX.textBaseline = 'bottom';
+    CTX.fillStyle = '#fff';
+    CTX.fillText(label, x, y - (r + 10));
+    CTX.restore();
+  };
+
+  drawOne(Game.p1, 'J1');
+  if (Game.mode === 'duo') drawOne(Game.p2, 'J2');
+}
+
+
+  
 /* Rendu */
 function draw(){
   if(!Game.themeLayer||!Game.wallsLayer){
@@ -3373,44 +3413,7 @@ function drawPlayerEntity(pl){
     CTX.restore();
   }
 
-  function drawPreStartBeacons(){
-  const drawOne = (pl, label) => {
-    if(!pl) return;
-    const x = pl.x * TILE, y = pl.y * TILE;
-    const t = performance.now() / 1000;
-
-    // halo pulsant (infini)
-    const r = 22 + 6*Math.sin(t*2.1);
-    const g = CTX.createRadialGradient(x, y, r*0.25, x, y, r*1.1);
-    g.addColorStop(0.00, 'rgba(255,240,180,0.70)');
-    g.addColorStop(0.55, 'rgba(255,210,100,0.28)');
-    g.addColorStop(1.00, 'rgba(255,210,100,0.00)');
-
-    CTX.save();
-    CTX.globalCompositeOperation = 'screen';
-    CTX.fillStyle = g;
-    CTX.beginPath(); CTX.arc(x, y, r*1.1, 0, Math.PI*2); CTX.fill();
-
-    // fin liseré
-    CTX.globalCompositeOperation = 'source-over';
-    CTX.lineWidth = 2;
-    CTX.strokeStyle = 'rgba(255,230,150,0.9)';
-    CTX.beginPath(); CTX.arc(x, y, r + 6, 0, Math.PI*2); CTX.stroke();
-
-    // petit label
-    CTX.font = 'bold 12px system-ui';
-    CTX.textAlign = 'center';
-    CTX.textBaseline = 'bottom';
-    CTX.fillStyle = '#fff';
-    CTX.fillText(label, x, y - (r + 10));
-    CTX.restore();
-  };
-
-  drawOne(Game.p1, 'J1');
-  if (Game.mode === 'duo') drawOne(Game.p2, 'J2');
-}
-
-
+  
   // --- Fonction de rendu champignon (sprite centré) ---
   const drawMushroomCentered = (cx, cy) => {
     if(pl.species.id==='cornucopioides')      drawTrumpet(CTX, cx, cy, 28, false, (pl.powerTimer>0));
