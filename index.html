@@ -191,30 +191,6 @@ function drawImgCenteredPath(path, x, y, s, ghost=false){
   CTX.restore();
 }
 
-  function drawHallucinogenicMirage(){
-  const m = Game.mirage;
-  if (!m) return;
-
-  const path = getSpritePath(m.speciesId);
-  const img  = loadImg(path);
-  if (!img.complete) return;
-
-  const px = m.x * TILE, py = m.y * TILE;
-  const s  = TILE * 0.9;
-
-  // léger va-et-vient pour l'effet de mirage
-  const t = (typeof performance!=='undefined' ? performance.now() : Date.now());
-  const off = 3 + Math.sin(t * 0.006) * 1.5;
-
-  CTX.save();
-  CTX.globalAlpha = 0.75;
-  CTX.filter = 'blur(2px) saturate(1.15)';  // flou léger + peps
-  CTX.drawImage(img, px - s/2 - off, py - s/2, s, s);
-  CTX.drawImage(img, px - s/2 + off, py - s/2, s, s);
-  CTX.restore();
-}
-
-
 /* ============ Entrées clavier ============ */
 const Keys=Object.create(null);
 function anyPanelOpen(){
@@ -920,13 +896,6 @@ if (pl.species.id === 'stropharia'){
     }
   });
   entries.push({
-  label: 'Spores hallucinogènes (15s)',
-  action: ()=>{
-    activateHallucinogenicSpores(pl);
-    sfxPower && sfxPower();
-  }
-});
-  entries.push({
     label: 'Planter bonus Vitesse (allié)',
     action: ()=>{
       const b = backTile(pl);
@@ -1370,7 +1339,6 @@ const Game={
   themeLayer:null, wallsLayer:null, pelletsLayer:null,
   floorLayer:null,
   sealWallFor: { 1: null, 2: null },
-  mirage: { active:false, ownerPid:0, gx:0, gy:0, timer:0 },
   vortexBlocks:[]
 };
 
@@ -1536,7 +1504,6 @@ const seed = (SESSION_SEEDS[i] ?? ((Math.random()*1e9)|0)) + (i*101);
 Game.grid = genLevel(seed);
   placeVortexes();
   Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
-  Game.mirage = null; // ← pas de mirage par défaut
   Game.muscariaTrap1=null; Game.muscariaTrap2=null; Game.remaining=0;
   Game.sealWallFor = { 1: null, 2: null };
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
@@ -1610,8 +1577,7 @@ const speed = base * SelectedDifficulty.factor;
   confusedTimer: 0,
 
   tpGrace: 0,
-  avoidVortex: 0, // frames à éviter de repasser sur un vortex
-  hallu: 0
+  avoidVortex: 0 // frames à éviter de repasser sur un vortex
 });
   }
 
@@ -1771,25 +1737,6 @@ function findOpenTileFarFrom(ref, minD){
 }
 function findOpenNear(cx,cy){ const dm=gridDims(); const cols=dm.cols, rows=dm.rows; const maxR=Math.max(cols,rows); for(let r=0;r<maxR;r++){ for(let dy=-r;dy<=r;dy++){ for(let dx=-r;dx<=r;dx++){ const x=cx+dx,y=cy+dy; if(x>=1&&y>=1&&x<cols-1&&y<rows-1){ if(Game.grid[y]&&Game.grid[y][x]===2) return {x,y}; } } } } return findOpenTile(); }
 
-// Comme findOpenNear, mais on exclut la case (cx,cy) elle-même
-function findOpenNearNotAt(cx, cy, notx, noty){
-  const dm = gridDims(); const C = dm.cols, R = dm.rows;
-  const maxR = Math.max(C, R);
-  for (let r=0; r<=maxR; r++){
-    for (let dy=-r; dy<=r; dy++){
-      for (let dx=-r; dx<=r; dx++){
-        const x = cx + dx, y = cy + dy;
-        if (x<=0 || y<=0 || x>=C-1 || y>=R-1) continue;   // bordure exclue
-        if (x===notx && y===noty) continue;               // exclure la case source
-        if (isWalkable(x, y)) return { x, y };            // même critère que l’IA
-      }
-    }
-  }
-  // secours : on refile la main à la version sans contrainte (ne devrait quasi jamais arriver)
-  return findOpenNear(cx, cy);
-}
-
-  
 // Téléporte un parasite sur la case ouverte la plus éloignée d'un joueur de référence
 function teleportParasiteFarFromPlayer(parasite, plRef){
   const dm = gridDims();
@@ -1868,8 +1815,7 @@ const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
     confusedTimer: 0,
 
     tpGrace: 0,
-    avoidVortex: 0, // frames à éviter de repasser sur un vortex
-    hallu: 0
+    avoidVortex: 0 // frames à éviter de repasser sur un vortex
   });
 }
 
@@ -2193,33 +2139,6 @@ function disableNearbyTraps(cx,cy,rad=3){
   if(Game.muscariaTrap2 && Math.hypot(Game.muscariaTrap2.x-cx, Game.muscariaTrap2.y-cy)<=rad) Game.muscariaTrap2.active=false;
 }
 
- // --- Spores hallucinogènes (Strophaire) ---
-function activateHallucinogenicSpores(stroph){
-  // 15 secondes en frames
-  const DURATION = 15 * 60;
-
-  // Case source = Strophaire
-  const sx = Math.floor(stroph.x), sy = Math.floor(stroph.y);
-
-  // Trouve la case libre LA PLUS PROCHE du Strophaire, différente de (sx,sy)
-  const spot = findOpenNearNotAt(sx, sy, sx, sy);
-
-  // Active le mirage
-  Game.mirage.active   = true;
-  Game.mirage.ownerPid = stroph.pid;
-  Game.mirage.gx       = spot.x;
-  Game.mirage.gy       = spot.y;
-  Game.mirage.timer    = DURATION;
-
-  // Sélectionne 50% des parasites et "charme-les" pendant 15s (vitesse x2)
-  Game.parasites.forEach(p=>{
-    p.halluCharm = 0;                    // reset propre
-    if (!p.servant && Math.random() < 0.5) {
-      p.halluCharm = DURATION;           // compteur en frames
-    }
-  });
-}
-
   
 function bfsParasite(start, goal){
   const key=(x,y)=>x+','+y;
@@ -2449,15 +2368,6 @@ function update(dt){
   updatePlayer(Game.p1, dt);
   if(Game.mode==='duo' && Game.p2) updatePlayer(Game.p2, dt);
 
-// Timer du mirage : quand il se termine, on nettoie les hallucinations
-if (Game.mirage) {
-  Game.mirage.timer--;
-  if (Game.mirage.timer <= 0) {
-    Game.mirage = null;
-    for (const p of Game.parasites) p.hallu = 0;
-  }
-}
-  
   // Parasites
 Game.parasites.forEach((p,idx)=>{
   // ⇨ MAJ orientation (quart de tour) en début de tick
@@ -2518,18 +2428,6 @@ Game.parasites.forEach((p,idx)=>{
       return; // tant que knockback actif
     }
 
-// --- Hallucination : attraction irrésistible vers le mirage ---
-if (Game.mirage && p.hallu > 0) {
-  p.hallu--;
-  // Vise la case du mirage en pathfinding, mais 2x plus vite
-  const mgx = Math.floor(Game.mirage.x), mgy = Math.floor(Game.mirage.y);
-  chaseViaPath(p, mgx, mgy, 2.0, dt); // ← helpers IA existants
-  safeClampParasite(p);
-  parasiteHitPlayers(p);
-  return; // on court-circuite les autres états tant que hallu actif
-}
-
-  
     // Confusion (après impact mur)
     if(p.confusedTimer>0){
       p.confusedTimer--;
@@ -2855,17 +2753,6 @@ if (!p.path || p.path.length === 0) {
     if(pa.type==='cloud'){ pa.r+=2*dt; pa.life-=1*dt; if(pa.life<=0) Game.particles.splice(i,1); }
   }
 
-  // --- Timer mirage (Strophaire) ---
-  if (Game.mirage.active){
-    Game.mirage.timer--;
-    if (Game.mirage.timer <= 0){
-      Game.mirage.active = false;
-      // on libère les parasites (plus charmés)
-      Game.parasites.forEach(p => p.halluCharm = 0);
-    }
-  }
-
-  
 // Vortex blocks timers
 for(let i=Game.vortexBlocks.length-1;i>=0;i--){
   Game.vortexBlocks[i].timer -= 1*dt;
@@ -3468,8 +3355,6 @@ Game.parasites.forEach(p=>{
   if(Game.p1) drawPlayerEntity(Game.p1);
   if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
 
-if (Game.mirage) drawHallucinogenicMirage();
-  
  // État pré-départ / pause / compte à rebours
 if (Game.preStart) {
   // balises infinies sur les positions des joueurs
