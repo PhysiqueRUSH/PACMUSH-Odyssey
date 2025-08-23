@@ -191,6 +191,30 @@ function drawImgCenteredPath(path, x, y, s, ghost=false){
   CTX.restore();
 }
 
+  function drawHallucinogenicMirage(){
+  const m = Game.mirage;
+  if (!m) return;
+
+  const path = getSpritePath(m.speciesId);
+  const img  = loadImg(path);
+  if (!img.complete) return;
+
+  const px = m.x * TILE, py = m.y * TILE;
+  const s  = TILE * 0.9;
+
+  // léger va-et-vient pour l'effet de mirage
+  const t = (typeof performance!=='undefined' ? performance.now() : Date.now());
+  const off = 3 + Math.sin(t * 0.006) * 1.5;
+
+  CTX.save();
+  CTX.globalAlpha = 0.75;
+  CTX.filter = 'blur(2px) saturate(1.15)';  // flou léger + peps
+  CTX.drawImage(img, px - s/2 - off, py - s/2, s, s);
+  CTX.drawImage(img, px - s/2 + off, py - s/2, s, s);
+  CTX.restore();
+}
+
+
 /* ============ Entrées clavier ============ */
 const Keys=Object.create(null);
 function anyPanelOpen(){
@@ -896,6 +920,13 @@ if (pl.species.id === 'stropharia'){
     }
   });
   entries.push({
+  label: 'Spores hallucinogènes (15s)',
+  action: ()=>{
+    activateHallucinogenicSpores(pl);
+    sfxPower && sfxPower();
+  }
+});
+  entries.push({
     label: 'Planter bonus Vitesse (allié)',
     action: ()=>{
       const b = backTile(pl);
@@ -1504,6 +1535,7 @@ const seed = (SESSION_SEEDS[i] ?? ((Math.random()*1e9)|0)) + (i*101);
 Game.grid = genLevel(seed);
   placeVortexes();
   Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
+  Game.mirage = null; // ← pas de mirage par défaut
   Game.muscariaTrap1=null; Game.muscariaTrap2=null; Game.remaining=0;
   Game.sealWallFor = { 1: null, 2: null };
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
@@ -1577,7 +1609,8 @@ const speed = base * SelectedDifficulty.factor;
   confusedTimer: 0,
 
   tpGrace: 0,
-  avoidVortex: 0 // frames à éviter de repasser sur un vortex
+  avoidVortex: 0, // frames à éviter de repasser sur un vortex
+  hallu: 0
 });
   }
 
@@ -1815,7 +1848,8 @@ const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
     confusedTimer: 0,
 
     tpGrace: 0,
-    avoidVortex: 0 // frames à éviter de repasser sur un vortex
+    avoidVortex: 0, // frames à éviter de repasser sur un vortex
+    hallu: 0
   });
 }
 
@@ -2139,6 +2173,26 @@ function disableNearbyTraps(cx,cy,rad=3){
   if(Game.muscariaTrap2 && Math.hypot(Game.muscariaTrap2.x-cx, Game.muscariaTrap2.y-cy)<=rad) Game.muscariaTrap2.active=false;
 }
 
+ // --- Spores hallucinogènes (Strophaire) ---
+function activateHallucinogenicSpores(pl){
+  const foe = (pl.pid===1 ? Game.p2 : Game.p1);
+  if (!foe) return;
+
+  // Mirage : double du coéquipier, figé au centre de sa case
+  Game.mirage = {
+    x: Math.floor(foe.x) + 0.5,
+    y: Math.floor(foe.y) + 0.5,
+    speciesId: foe.species.id,
+    timer: 15 * 60 // 15 s à 60 FPS
+  };
+
+  // 50% des parasites deviennent hallucinés et sprintent vers le mirage
+  for (const p of Game.parasites){
+    p.hallu = (Math.random() < 0.5) ? 15*60 : 0;
+    if (p.hallu > 0){ p.path = []; p.lastSeen = null; } // on recalcule proprement
+  }
+}
+ 
   
 function bfsParasite(start, goal){
   const key=(x,y)=>x+','+y;
@@ -2368,6 +2422,15 @@ function update(dt){
   updatePlayer(Game.p1, dt);
   if(Game.mode==='duo' && Game.p2) updatePlayer(Game.p2, dt);
 
+// Timer du mirage : quand il se termine, on nettoie les hallucinations
+if (Game.mirage) {
+  Game.mirage.timer--;
+  if (Game.mirage.timer <= 0) {
+    Game.mirage = null;
+    for (const p of Game.parasites) p.hallu = 0;
+  }
+}
+  
   // Parasites
 Game.parasites.forEach((p,idx)=>{
   // ⇨ MAJ orientation (quart de tour) en début de tick
@@ -2428,6 +2491,18 @@ Game.parasites.forEach((p,idx)=>{
       return; // tant que knockback actif
     }
 
+// --- Hallucination : attraction irrésistible vers le mirage ---
+if (Game.mirage && p.hallu > 0) {
+  p.hallu--;
+  // Vise la case du mirage en pathfinding, mais 2x plus vite
+  const mgx = Math.floor(Game.mirage.x), mgy = Math.floor(Game.mirage.y);
+  chaseViaPath(p, mgx, mgy, 2.0, dt); // ← helpers IA existants
+  safeClampParasite(p);
+  parasiteHitPlayers(p);
+  return; // on court-circuite les autres états tant que hallu actif
+}
+
+  
     // Confusion (après impact mur)
     if(p.confusedTimer>0){
       p.confusedTimer--;
@@ -3355,6 +3430,8 @@ Game.parasites.forEach(p=>{
   if(Game.p1) drawPlayerEntity(Game.p1);
   if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
 
+if (Game.mirage) drawHallucinogenicMirage();
+  
  // État pré-départ / pause / compte à rebours
 if (Game.preStart) {
   // balises infinies sur les positions des joueurs
