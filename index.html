@@ -214,6 +214,10 @@ addEventListener('keydown', (e)=>{
   if(e.key === 'Enter') triggerPower(1);
   if(k==='f') triggerPower(2);
 
+  // Activation SUPER pouvoirs — J1: ShiftRight, J2: Space
+  if (e.code === 'ShiftRight') { e.preventDefault(); triggerSuperPower(1); }
+  if (e.code === 'Space')      { e.preventDefault(); triggerSuperPower(2); }
+
  // pause / compte à rebours (inclut lancement initial)
 if (k === 'p') {
   // 1) Pas encore démarré : on lit les options, on ferme le menu, on lance la partie + CR
@@ -338,6 +342,39 @@ if (pl.panelActive) return;
   }
 }
 
+function triggerSuperPower(pid){
+  // Pas de partie => on démarre de suite la partie comme triggerPower
+  if(!Game.started){ startGame(); return; }
+  if(Game.countdown>0) return;
+
+  const pl = (pid===1 ? Game.p1 : Game.p2);
+  if(!pl) return;
+  if (!pl.superPowerHeld) return; // rien en poche
+
+  // on consomme le stock
+  pl.superPowerHeld = false;
+  const hudEl = (pid===1?UI.power1:UI.power2);
+  if (hudEl) hudEl.textContent = '★ utilisé';
+
+  // Effet "super" : si le pouvoir n'est pas actif, on le démarre d'abord
+  const addFrames = 120; // +2 s @60fps
+  if (pl.powerTimer <= 0){
+    const before = pl.powerTimer|0;
+    // Respecte les garde-fous usuels ? Ici on CHOISIT de bypass le cooldown pour un effet "super"
+    pl.species.use(pl);
+    if ((pl.powerTimer|0) > before){
+      if (hudEl) hudEl.textContent = pl.species.power || 'Pouvoir';
+      sfxPower();
+    }
+  }
+  // Dans tous les cas, on ajoute +2 s
+  pl.powerTimer += addFrames;
+
+  // petit feedback audio/visuel en plus si tu veux
+  sfxPower();
+}
+
+  
 
 /* ============ Utils ============ */
 const now=()=>performance.now();
@@ -1604,7 +1641,8 @@ function makePlayer(tx,ty,pid,species){
     panelActive:false,           // fenêtre latérale ouverte (immobile + rémap des touches)
     panelSel:0,                  // index en surbrillance dans la liste
     hiddenFromParasites:false,   // non-ciblable par l’IA parasite (ciblage)
-    anthurusCharge:0             // compte de spores mangées depuis la dernière activation
+    anthurusCharge:0,             // compte de spores mangées depuis la dernière activation
+    superPowerHeld:false       // ← NOUVEAU : tient un bonus "power" en stock ?
   };
 }
 
@@ -1642,6 +1680,7 @@ function resetPlayerTransientForNewLevel(pl){
   pl.nextPowerExtend = 0;
   pl.speedBuffs = 0;
   pl.speed = pl.baseSpeed;
+  pl.superPowerHeld = false;
 
   // IMPORTANT : on NE remet PAS pl.collectedSpores ici
 }
@@ -2202,51 +2241,62 @@ function releaseServant(ownerPid){
 
 /* Bonus */
 function eatBonusFor(player,b){
-  Game.grid[b.y][b.x]=0;
+  // Par défaut on ne retire pas de la map tant qu'on n'a pas consommé
+  let consumed = false;
+  const clearCell = () => { Game.grid[b.y][b.x] = 0; consumed = true; };
+
   switch(b.kind){
     case 'life':
-      if(player.pid===1){ Game.lives1++; UI.lives1.textContent=Game.lives1; } else { Game.lives2++; UI.lives2.textContent=Game.lives2; }
-      sfxLife(); break;
- case 'speed': {
-  const mult = 1.4;   // même multiplicateur qu'avant
-  const dur  = 6000;  // 6 s comme avant
-
-  // Lazy init pour un patch minimal (aucune autre modif requise ailleurs)
-  if (player.baseSpeed == null) player.baseSpeed = player.speed || 0.11;
-  if (player.speedBuffs == null) player.speedBuffs = 0;
-
-  // On ajoute un buff et on recalcule à partir de la base (pas de divisions en cascade)
-  player.speedBuffs += 1;
-  player.speed = player.baseSpeed * Math.pow(mult, player.speedBuffs);
-  sfxPower();
-
-  // À l'expiration, on décrémente et on recalcule proprement
-  setTimeout(() => {
-    // garde-fou si le joueur a été réinitialisé entre-temps
-    player.speedBuffs = Math.max(0, (player.speedBuffs || 0) - 1);
-    player.speed = player.baseSpeed * Math.pow(mult, player.speedBuffs);
-  }, dur);
-
-  break;
-}
-
-    case 'power':
-      player.nextPowerExtend=(player.nextPowerExtend||0)+120; // +2s
-      (player.pid===1?UI.power1:UI.power2).textContent='★ prêt (+2s)'; sfxPower();
+      clearCell();
+      if(player.pid===1){ Game.lives1++; UI.lives1.textContent=Game.lives1; }
+      else { Game.lives2++; UI.lives2.textContent=Game.lives2; }
+      sfxLife();
       break;
+
+    case 'speed': {
+      clearCell();
+      const mult = 1.4, dur = 6000;
+      if (player.baseSpeed == null) player.baseSpeed = player.speed || 0.11;
+      if (player.speedBuffs == null) player.speedBuffs = 0;
+      player.speedBuffs += 1;
+      player.speed = player.baseSpeed * Math.pow(mult, player.speedBuffs);
+      sfxPower();
+      setTimeout(() => {
+        player.speedBuffs = Math.max(0, (player.speedBuffs || 0) - 1);
+        player.speed = player.baseSpeed * Math.pow(mult, player.speedBuffs);
+      }, dur);
+      break;
+    }
+
+    case 'power': {
+      // NON-CUMULABLE : si le joueur a déjà un power en poche, on ne ramasse pas.
+      if (player.superPowerHeld) {
+        // rien : le bonus reste au sol
+      } else {
+        clearCell();
+        player.superPowerHeld = true;                       // on le met en poche
+        (player.pid===1?UI.power1:UI.power2).textContent = '★ en poche';
+        sfxPower();
+      }
+      break;
+    }
+
     case 'score':
+      clearCell();
       if(player.pid===1){ Game.score1+=500; UI.score1.textContent=Game.score1; }
-  else { Game.score2+=500; UI.score2.textContent=Game.score2; }
-  updateLeaderHUD();
-  sfxPower();
-  break;
+      else { Game.score2+=500; UI.score2.textContent=Game.score2; }
+      updateLeaderHUD(); sfxPower();
+      break;
+
     case 'freeze':
-  // immobilise brièvement tout le monde (~3s)
-  Game.parasites.forEach(p => { p.frozen = Math.max(p.frozen||0, 180); });
-  sfxPower();
-  break;
+      clearCell();
+      Game.parasites.forEach(p => { p.frozen = Math.max(p.frozen||0, 180); });
+      sfxPower();
+      break;
   }
+  return consumed; // ← indique si l’objet doit être retiré de la map
 }
+
 function refreshPelletCell(x,y){ if(!Game.pelletsLayer) return; const pctx=Game.pelletsLayer.getContext('2d'); pctx.clearRect(x*TILE,y*TILE,TILE,TILE); }
 
 /* Entrées direction */
@@ -3118,14 +3168,17 @@ function updatePlayer(pl, dt){
     }
   }
 
-  // --- Bonus ---
-  for (let i = Game.bonuses.length - 1; i >= 0; i--){
-    const b = Game.bonuses[i];
-    if (b.x === ntX && b.y === ntY){
-      eatBonusFor(pl, b);
+// --- Bonus ---
+for (let i = Game.bonuses.length - 1; i >= 0; i--){
+  const b = Game.bonuses[i];
+  if (b.x === ntX && b.y === ntY){
+    const didConsume = eatBonusFor(pl, b);   // ← retourne true si retiré du sol
+    if (didConsume){
       Game.bonuses.splice(i, 1);
+      refreshPelletCell(b.x, b.y);
     }
   }
+}
 
   // --- Pièges (tuile 4) ---
   if (Game.grid[ntY] && Game.grid[ntY][ntX] === 4){
@@ -3435,6 +3488,30 @@ function drawPlayerEntity(pl){
     CTX.fill();
     CTX.restore();
   }
+
+  // — Indicateur "power en poche"
+if (pl.superPowerHeld){
+  CTX.save();
+  CTX.translate(x, y - 26);          // juste au-dessus de la tête
+  // halo
+  const t = performance.now() * 0.006;
+  const r = 10 + 2*Math.sin(t*3.0);
+  const g = CTX.createRadialGradient(0,0,2, 0,0,r);
+  g.addColorStop(0, 'rgba(255,255,200,0.9)');
+  g.addColorStop(1, 'rgba(255,255,200,0.0)');
+  CTX.globalCompositeOperation = 'screen';
+  CTX.fillStyle = g;
+  CTX.beginPath(); CTX.arc(0,0,r,0,Math.PI*2); CTX.fill();
+
+  // étoile
+  CTX.globalCompositeOperation = 'source-over';
+  CTX.font = '14px system-ui';
+  CTX.textAlign = 'center';
+  CTX.textBaseline = 'middle';
+  CTX.fillStyle = '#fff';
+  CTX.fillText('★', 0, 0);
+  CTX.restore();
+}
 
   
   // --- Fonction de rendu champignon (sprite centré) ---
