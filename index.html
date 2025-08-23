@@ -208,14 +208,8 @@ function triggerPower(pid){
   const pl = (pid===1 ? Game.p1 : Game.p2);
   if(!pl) return;
 
-  // Si un PANNEAU est déjà ouvert pour ce joueur,
-  // la touche Pouvoir sert de VALIDATION du choix (et non à relancer un pouvoir)
-  if (pl.panelActive) {
-    if (typeof powerPanelConfirm === 'function') {
-      powerPanelConfirm(pl);
-    }
-    return;
-  }
+// Si un panneau est déjà ouvert pour ce joueur → on ne fait rien ici
+if (pl.panelActive) return;
 
   // Pas de relance si un pouvoir est en cours
   if (pl.powerTimer > 0) return;
@@ -237,7 +231,7 @@ function triggerPower(pid){
     const el = (pid===1?UI.power1:UI.power2);
     if (el) el.textContent = 'Panel (10s)';
 
-    if (typeof openPowerPanel === 'function') openPowerPanel(pl, getPowerPanelEntries(pl));
+    if (typeof openPowerPanel === 'function') openPowerPanel(pl);
     sfxPower();
     return;
   }
@@ -262,7 +256,7 @@ function triggerPower(pid){
     const el = (pid===1?UI.power1:UI.power2);
     if (el) el.textContent = 'Panel (10s)';
 
-    if (typeof openPowerPanel === 'function') openPowerPanel(pl, getPowerPanelEntries(pl));
+    if (typeof openPowerPanel === 'function') openPowerPanel(pl);
     if (typeof refreshPowerHUD === 'function') refreshPowerHUD(pl);
     sfxPower();
     return;
@@ -665,50 +659,21 @@ function attachOverlayEvents(ov){
       updateStartButtonState();
     }
   });
-  ov.addEventListener('keydown', (e)=>{
-    if((e.key==='Enter'||e.key===' ') && updateStartButtonState()){
-      e.preventDefault(); readOptionsFromOverlay(); startGame();
-    }
-  });
+ ov.addEventListener('keydown', (e)=>{
+  if ((e.key === 'Enter' || e.key === ' ') && updateStartButtonState()){
+    e.preventDefault();
+    e.stopPropagation(); // <<< évite le 2e start via le listener global
+    readOptionsFromOverlay();
+    startGame();
+  }
+});
 }
 
-function openPowerPanel(pl, entries){
-  closePowerPanel(pl); // sécurité
-  pl.panelActive = true;
-  pl.panelSel = 0;
-  pl.hiddenFromParasites = true; // non-ciblable tant que le panel est ouvert
-
-  const side = (pl.pid===1) ? 'right:8px; left:auto;' : 'left:8px; right:auto;';
-  const panel = document.createElement('div');
-  panel.className='card';
-  panel.style.cssText = `
-    position:fixed; top:8px; ${side} z-index:9998; width:260px; max-height:calc(100vh - 16px);
-    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; overflow:auto;
-  `;
-  panel.id = `powerPanel_${pl.pid}`;
-
-  const title = document.createElement('div');
-  title.className='title';
-  title.style.fontSize='18px';
-  title.textContent = (pl.species.id==='stropharia') ? 'Aide coop (10s)' : 'Sabotage (10s)';
-  panel.appendChild(title);
-
-  const list = document.createElement('div');
-  list.id = `powerList_${pl.pid}`;
-  panel.appendChild(list);
-
-  function powerPanelConfirm(pl){
-  // permet d'utiliser la touche Pouvoir comme "OK" si tu le souhaites
-  const entries = getPowerPanelEntries(pl);
-  const i = (pl.panelSel|0);
-  if (entries[i] && typeof entries[i].action === 'function') entries[i].action();
-}
-
+// === Helpers Panneau (globaux) ===
 function getPowerPanelEntries(pl){
   const tx = Math.floor(pl.x), ty = Math.floor(pl.y);
   const foe = (pl.pid===1 ? Game.p2 : Game.p1);
   const dm = gridDims(), C=dm.cols, R=dm.rows;
-
   const isInterior = (x,y)=> (x>0 && y>0 && x<C-1 && y<R-1);
 
   const entries = [];
@@ -717,7 +682,6 @@ function getPowerPanelEntries(pl){
     entries.push({
       label: 'Planter un arbre (mur)',
       action: ()=>{ 
-        // évite d’écraser bonus/piège actif ; si spore, on efface la pastille
         if (Game.grid[ty][tx]!==1){
           safeSetWallWithAntiSeal(tx, ty, foe);
           refreshPelletCell(tx,ty);
@@ -729,9 +693,12 @@ function getPowerPanelEntries(pl){
       label: 'Détruire un arbre (intérieur)',
       action: ()=>{
         if (isInterior(tx,ty) && Game.grid[ty][tx]===1){
-          Game.grid[ty][tx]=2; // on remet une spore
+          Game.grid[ty][tx]=2; // remettre une spore
           redrawWallIfAny(tx,ty);
           addPelletCell(tx,ty);
+          if (Game.sealWallFor[foe.pid] && Game.sealWallFor[foe.pid].x===tx && Game.sealWallFor[foe.pid].y===ty) {
+  Game.sealWallFor[foe.pid] = null;
+}
           sfxPower();
         }
       }
@@ -778,13 +745,13 @@ function getPowerPanelEntries(pl){
   if (pl.species.id === 'anthurus'){
     entries.push({
       label: 'Planter un arbre (mur)',
-      action: ()=>{
-        if (Game.grid[ty][tx]!==1){
-          safeSetWallWithAntiSeal(tx, ty, foe);
-          refreshPelletCell(tx,ty);
-          sfxPower();
-        }
-      }
+action: ()=>{
+  if (Game.grid[ty][tx]!==1){
+    placeWallWithSealTracking(tx, ty, pl, foe); // <<< au lieu de safeSetWallWithAntiSeal
+    refreshPelletCell(tx,ty);
+    sfxPower();
+  }
+}
     });
     entries.push({
       label: 'Détruire un arbre (intérieur)',
@@ -820,8 +787,40 @@ function getPowerPanelEntries(pl){
   return entries;
 }
 
+function powerPanelConfirm(pl){
+  const entries = getPowerPanelEntries(pl);
+  const i = (pl.panelSel|0);
+  if (entries[i] && typeof entries[i].action === 'function') entries[i].action();
+}
+
+  
+function openPowerPanel(pl){
+  closePowerPanel(pl); // sécurité
+  pl.panelActive = true;
+  pl.panelSel = 0;
+  pl.hiddenFromParasites = true; // non-ciblable tant que le panel est ouvert
+
+  const side = (pl.pid===1) ? 'right:8px; left:auto;' : 'left:8px; right:auto;';
+  const panel = document.createElement('div');
+  panel.className='card';
+  panel.style.cssText = `
+    position:fixed; top:8px; ${side} z-index:9998; width:260px; max-height:calc(100vh - 16px);
+    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; overflow:auto;
+  `;
+  panel.id = `powerPanel_${pl.pid}`;
+
+  const title = document.createElement('div');
+  title.className='title';
+  title.style.fontSize='18px';
+  title.textContent = (pl.species.id==='stropharia') ? 'Aide coop (10s)' : 'Sabotage (10s)';
+  panel.appendChild(title);
+
+  const list = document.createElement('div');
+  list.id = `powerList_${pl.pid}`;
+  panel.appendChild(list);
 
   function render(){
+    const entries = getPowerPanelEntries(pl);
     list.innerHTML='';
     entries.forEach((e,i)=>{
       const item = document.createElement('div');
@@ -840,9 +839,9 @@ function getPowerPanelEntries(pl){
     const up = (pl.pid===1) ? 'arrowup' : 'z';
     const down = (pl.pid===1) ? 'arrowdown' : 's';
     const ok = (pl.pid===1) ? 'enter' : 'f';
-    if(k===up){ pl.panelSel = (pl.panelSel-1+entries.length)%entries.length; render(); e.preventDefault(); }
-    else if(k===down){ pl.panelSel = (pl.panelSel+1)%entries.length; render(); e.preventDefault(); }
-    else if(k===ok){ entries[pl.panelSel].action(); e.preventDefault(); }
+    if(k===up){ pl.panelSel = (pl.panelSel-1+getPowerPanelEntries(pl).length)%getPowerPanelEntries(pl).length; render(); e.preventDefault(); }
+    else if(k===down){ pl.panelSel = (pl.panelSel+1)%getPowerPanelEntries(pl).length; render(); e.preventDefault(); }
+    else if(k===ok){ powerPanelConfirm(pl); e.preventDefault(); }
   }
   panel._onKey = onKey;
   document.addEventListener('keydown', onKey);
@@ -1098,6 +1097,7 @@ const Game={
   showStartHint: 0,
   themeLayer:null, wallsLayer:null, pelletsLayer:null,
   floorLayer:null,
+  sealWallFor: { 1: null, 2: null },
   vortexBlocks:[]
 };
 
@@ -1257,6 +1257,7 @@ Game.grid = genLevel(seed);
   placeVortexes();
   Game.traps=[]; Game.bonuses=[]; Game.parasites=[]; Game.particles=[];
   Game.muscariaTrap1=null; Game.muscariaTrap2=null; Game.remaining=0;
+  Game.sealWallFor = { 1: null, 2: null };
   const dm=gridDims(); const cols=dm.cols, rows=dm.rows;
 
   for(let y=0;y<rows;y++){
@@ -1678,19 +1679,97 @@ function countReachableSporesFrom(gx,gy){
 // place un mur, annule si cela isole l’adversaire de TOUTES les spores restantes
 function safeSetWallWithAntiSeal(x,y, oppPlayer){
   const prev = Game.grid[y][x];
-  Game.grid[y][x]=1; redrawWallIfAny(x,y);
+  Game.grid[y][x] = 1;
+  redrawWallIfAny(x,y);
+
   const oppGX = Math.floor(oppPlayer.x), oppGY = Math.floor(oppPlayer.y);
   const spores = countReachableSporesFrom(oppGX, oppGY);
-  if (spores===0){
-    Game.grid[y][x]=prev; redrawWallIfAny(x,y);
+
+  if (spores === 0){
+    // Annulé → on restaure l’état visuel aussi
+    Game.grid[y][x] = prev;
+    redrawWallIfAny(x,y);
+    if (prev === 2) addPelletCell(x,y);   // <<< Restaure le point lumineux
   }
 }
 
+function placeWallWithSealTracking(x, y, ownerPl, oppPl){
+  // On ne suit que le cas Anthurus
+  if (!ownerPl || ownerPl.species.id !== 'anthurus') {
+    safeSetWallWithAntiSeal(x, y, oppPl);
+    return;
+  }
+  // rien à faire si déjà un mur
+  if (Game.grid[y][x] === 1) return;
+
+  const before = countReachableSporesFrom(Math.floor(oppPl.x), Math.floor(oppPl.y));
+
+  // Pose réelle (avec anti-seal total déjà en place)
+  safeSetWallWithAntiSeal(x, y, oppPl);
+
+  // Si la pose a été annulée, on sort
+  if (Game.grid[y][x] !== 1) return;
+
+  const after = countReachableSporesFrom(Math.floor(oppPl.x), Math.floor(oppPl.y));
+
+  // Si on a réduit l’accès de l’adversaire (mais pas à zéro),
+  // et qu’il reste des spores ailleurs sur la carte → on mémorise ce mur
+  if (after > 0 && after < before && after < Game.remaining) {
+    Game.sealWallFor[oppPl.pid] = { x, y };
+  }
+}
+
+function autoUnsealIfRegionCleared(pl){
+  if (!pl) return;
+
+  // 1) avons-nous mémorisé un "mur de fermeture" pour ce joueur ?
+  const rec = Game.sealWallFor[pl.pid];
+  if (!rec) return;
+
+  // 2) si le mur a déjà disparu (détruit manuellement ou regénération niveau), nettoyer l'état
+  if (Game.grid[rec.y][rec.x] !== 1){
+    Game.sealWallFor[pl.pid] = null;
+    return;
+  }
+
+  // 3) combien de spores sont joignables depuis sa position actuelle ?
+  const reachable = countReachableSporesFrom(Math.floor(pl.x), Math.floor(pl.y));
+
+  // 4) déclencheur :
+  //    - "reachable === 0" : sa zone fermée est désormais vide de spores
+  //    - "Game.remaining > 0" : il reste des spores quelque part ailleurs sur la carte
+  //      => on EST autorisé à rouvrir (sinon la condition serait vraie aussi en fin de niveau)
+  if (reachable === 0 && Game.remaining > 0){
+    // 5) on détruit UNIQUEMENT ce "dernier mur" — on ouvre en case VIDE (0)
+    //    pour ne PAS manipuler Game.remaining (pas de nouvelle spore créée)
+    Game.grid[rec.y][rec.x] = 0;
+
+    // 6) mise à jour visuelle du calque des murs
+    redrawWallIfAny(rec.x, rec.y); // efface le sprite (clearRect) car ce n'est plus un mur
+
+    // 7) on oublie ce suivi (coup unique)
+    Game.sealWallFor[pl.pid] = null;
+
+    // 8) petit feedback audio facultatif
+    sfxPower();
+  }
+}
+
+  
 function spawnTemporaryVortex(tx,ty,frames=600){
   const prev = Game.grid[ty][tx];
+
+  // Retire et mémorise un éventuel item (bonus/piège) sur la case
+  let savedBonus = null, savedTrap = null;
+  const bi = Game.bonuses.findIndex(b=>b.x===tx && b.y===ty);
+  if (bi>=0) savedBonus = Game.bonuses.splice(bi,1)[0];
+  const ti = Game.traps.findIndex(t=>t.x===tx && t.y===ty);
+  if (ti>=0) savedTrap = Game.traps.splice(ti,1)[0];
+
   Game.grid[ty][tx] = VORTEX;
-  Game.vortexes.push({x:tx, y:ty, temp:true, expires:frames, prev});
+  Game.vortexes.push({x:tx, y:ty, temp:true, expires:frames, restore:{prev, savedBonus, savedTrap}});
 }
+
 
 function disableNearbyTraps(cx,cy,rad=3){
   for(let i=Game.traps.length-1;i>=0;i--){
@@ -2306,19 +2385,28 @@ for (let i = Game.vortexes.length - 1; i >= 0; i--){
   if (v && v.temp){
     v.expires -= 1*dt;
     if (v.expires <= 0){
-      // Restaure la tuile d'origine (0 = vide, 2 = spore)
-      Game.grid[v.y][v.x] = (v.prev != null ? v.prev : 2);
+      const r = v.restore || {prev:2};
+      // 1) Restaure la tuile d'origine
+      Game.grid[v.y][v.x] = (r.prev != null ? r.prev : 2);
 
-      // Si c'était une spore, redessine-la dans le calque pellets
+      // 2) Si c'était une spore, redessine-la
       if (Game.grid[v.y][v.x] === 2) addPelletCell(v.x, v.y);
 
-      // Retire ce vortex temporaire de la liste
+      // 3) Restaure bonus/piège s'ils existaient
+      if (r.savedBonus) Game.bonuses.push(r.savedBonus);
+      if (r.savedTrap)  Game.traps.push(r.savedTrap);
+
+      // 4) Retire le vortex temporaire
       Game.vortexes.splice(i, 1);
     }
   }
 }
 
+
 if (Game.mode === 'duo') anthurusCatchCheck();
+// --- AUTO-UNSEAL : si la zone fermée d'un joueur est vidée, on casse le dernier mur
+autoUnsealIfRegionCleared(Game.p1);
+if (Game.mode === 'duo' && Game.p2) autoUnsealIfRegionCleared(Game.p2);
 
   
 // Fin de niveau / match
