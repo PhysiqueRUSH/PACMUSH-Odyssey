@@ -2269,17 +2269,24 @@ function update(dt){
   if(Game.mode==='duo' && Game.p2) updatePlayer(Game.p2, dt);
 
   // Parasites
-  Game.parasites.forEach((p,idx)=>{
-    if (p.tpGrace>0) p.tpGrace--;
-    if (p.avoidVortex>0) p.avoidVortex--;
-    // --- Gel global (freeze bonus) : immobile mais toujours dangereux si on le touche
-if (p.frozen > 0) {
-  p.frozen--;
-  // pas de déplacement ni d'IA, mais on conserve le check de collision:
-  safeClampParasite(p)
-  parasiteHitPlayers(p);
-  return;
-}
+Game.parasites.forEach((p,idx)=>{
+  // ⇨ MAJ orientation (quart de tour) en début de tick
+  updateParasiteOrientation(p, dt);
+
+  if (p.tpGrace>0) p.tpGrace--;
+  if (p.avoidVortex>0) p.avoidVortex--;
+
+  // --- Gel global (freeze bonus) : immobile mais toujours dangereux si on le touche
+  if (p.frozen > 0) {
+    p.frozen--;
+    // pas de déplacement ni d'IA, mais on conserve le check de collision:
+    safeClampParasite(p)
+    parasiteHitPlayers(p);
+          // ⇨ Optionnel : synchronise la rotation pendant le knockback
+      updateParasiteOrientation(p, dt);
+    return;
+  }
+
 
     // ---------- Knockback prioritaire + effet domino ----------
     if(p.kbActive){
