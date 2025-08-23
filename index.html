@@ -678,111 +678,121 @@ function getPowerPanelEntries(pl){
 
   const entries = [];
 
-  if (pl.species.id === 'stropharia'){
-    entries.push({
-      label: 'Planter un arbre (mur)',
-      action: ()=>{ 
-        if (Game.grid[ty][tx]!==1){
-          safeSetWallWithAntiSeal(tx, ty, foe);
-          refreshPelletCell(tx,ty);
-          sfxPower();
-        }
-      }
-    });
-    entries.push({
-      label: 'Détruire un arbre (intérieur)',
-      action: ()=>{
-        if (isInterior(tx,ty) && Game.grid[ty][tx]===1){
-          Game.grid[ty][tx]=2; // remettre une spore
-          redrawWallIfAny(tx,ty);
-          addPelletCell(tx,ty);
-          if (Game.sealWallFor[foe.pid] && Game.sealWallFor[foe.pid].x===tx && Game.sealWallFor[foe.pid].y===ty) {
-  Game.sealWallFor[foe.pid] = null;
-}
-          sfxPower();
-        }
-      }
-    });
-    entries.push({
-      label: 'Planter bonus Vitesse (allié)',
-      action: ()=>{
-        if (isInterior(tx,ty) && Game.grid[ty][tx]!==1){
-          Game.grid[ty][tx]=3; refreshPelletCell(tx,ty);
-          Game.bonuses.push({x:tx,y:ty,kind:'speed'});
-          sfxPower();
-        }
-      }
-    });
-    entries.push({
-      label: 'Planter bonus Freeze',
-      action: ()=>{
-        if (isInterior(tx,ty) && Game.grid[ty][tx]!==1){
-          Game.grid[ty][tx]=3; refreshPelletCell(tx,ty);
-          Game.bonuses.push({x:tx,y:ty,kind:'freeze'});
-          sfxPower();
-        }
-      }
-    });
-    entries.push({
-      label: 'Créer un vortex (10s)',
-      action: ()=>{
-        if (isInterior(tx,ty) && Game.grid[ty][tx]!==1){
-          refreshPelletCell(tx,ty);
-          spawnTemporaryVortex(tx,ty,600);
-          sfxPower();
-        }
-      }
-    });
-    entries.push({
-      label: 'Désactiver pièges à proximité',
-      action: ()=>{
-        disableNearbyTraps(tx,ty,3);
+if (pl.species.id === 'stropharia'){
+  entries.push({
+    label: 'Planter un arbre (mur)',
+    action: ()=>{ 
+      if (Game.grid[ty][tx]!==1){
+        safeSetWallWithAntiSeal(tx, ty, foe);
+        refreshPelletCell(tx,ty);
         sfxPower();
       }
-    });
-  }
+    }
+  });
+  entries.push({
+    label: 'Abattre un arbre (devant)',
+    action: ()=>{
+      const f = frontTile(pl);
+      if (isInterior(f.tx,f.ty) && Game.grid[f.ty][f.tx]===1){
+        Game.grid[f.ty][f.tx]=2;
+        redrawWallIfAny(f.tx,f.ty);
+        addPelletCell(f.tx,f.ty);
+        // si c’était le mur "clé" de l’adversaire, on purge
+        if (Game.sealWallFor[foe.pid] &&
+            Game.sealWallFor[foe.pid].x===f.tx &&
+            Game.sealWallFor[foe.pid].y===f.ty){
+          Game.sealWallFor[foe.pid] = null;
+        }
+        sfxPower();
+      }
+    }
+  });
+  entries.push({
+    label: 'Planter bonus Vitesse (allié)',
+    action: ()=>{
+      const b = backTile(pl);
+      if (isInterior(b.tx,b.ty) && Game.grid[b.ty][b.tx]!==1){
+        Game.grid[b.ty][b.tx]=3; refreshPelletCell(b.tx,b.ty);
+        Game.bonuses.push({x:b.tx,y:b.ty,kind:'speed'});
+        sfxPower();
+      }
+    }
+  });
+  entries.push({
+    label: 'Planter bonus Freeze',
+    action: ()=>{
+      const b = backTile(pl);
+      if (isInterior(b.tx,b.ty) && Game.grid[b.ty][b.tx]!==1){
+        Game.grid[b.ty][b.tx]=3; refreshPelletCell(b.tx,b.ty);
+        Game.bonuses.push({x:b.tx,y:b.ty,kind:'freeze'});
+        sfxPower();
+      }
+    }
+  });
+  entries.push({
+    label: 'Créer un vortex (10s)',
+    action: ()=>{
+      const b = backTile(pl);
+      if (isInterior(b.tx,b.ty) && Game.grid[b.ty][b.tx]!==1){
+        refreshPelletCell(b.tx,b.ty);
+        spawnTemporaryVortex(b.tx,b.ty,600);
+        sfxPower();
+      }
+    }
+  });
+  entries.push({
+    label: 'Désactiver pièges à proximité',
+    action: ()=>{ disableNearbyTraps(tx,ty,3); sfxPower(); }
+  });
+}
 
-  if (pl.species.id === 'anthurus'){
-    entries.push({
-      label: 'Planter un arbre (mur)',
-action: ()=>{
-  if (Game.grid[ty][tx]!==1){
-    placeWallWithSealTracking(tx, ty, pl, foe); // <<< au lieu de safeSetWallWithAntiSeal
-    refreshPelletCell(tx,ty);
-    sfxPower();
-  }
-}
-    });
-    entries.push({
-      label: 'Détruire un arbre (intérieur)',
-      action: ()=>{
-        if (isInterior(tx,ty) && Game.grid[ty][tx]===1){
-          Game.grid[ty][tx]=2;
-          redrawWallIfAny(tx,ty);
-          addPelletCell(tx,ty);
-          sfxPower();
-        }
-      }
-    });
-    entries.push({
-      label: 'Envoyer un nouveau parasite',
-      action: ()=>{
-        spawnEnemy();
+
+ if (pl.species.id === 'anthurus'){
+  entries.push({
+    label: 'Planter un arbre (mur)',
+    action: ()=>{
+      if (Game.grid[ty][tx]!==1){
+        placeWallWithSealTracking(tx, ty, pl, foe);
+        refreshPelletCell(tx,ty);
         sfxPower();
       }
-    });
-    entries.push({
-      label: 'Créer un piège (ovale vert)',
-      action: ()=>{
-        if (isInterior(tx,ty) && Game.grid[ty][tx]!==1){
-          Game.grid[ty][tx]=4;
-          Game.traps.push({x:tx,y:ty,t:1}); // t=1 => ovale vert (freeze)
-          refreshPelletCell(tx,ty);
-          sfxPower();
+    }
+  });
+  entries.push({
+    label: 'Abattre un arbre (devant)',
+    action: ()=>{
+      const f = frontTile(pl);
+      if (isInterior(f.tx,f.ty) && Game.grid[f.ty][f.tx]===1){
+        Game.grid[f.ty][f.tx]=2;
+        redrawWallIfAny(f.tx,f.ty);
+        addPelletCell(f.tx,f.ty);
+        // si c’était le mur "clé" mémorisé, purge
+        if (Game.sealWallFor[foe.pid] &&
+            Game.sealWallFor[foe.pid].x===f.tx &&
+            Game.sealWallFor[foe.pid].y===f.ty){
+          Game.sealWallFor[foe.pid] = null;
         }
+        sfxPower();
       }
-    });
-  }
+    }
+  });
+  entries.push({
+    label: 'Envoyer un nouveau parasite',
+    action: ()=>{ spawnEnemy(); sfxPower(); }
+  });
+  entries.push({
+    label: 'Créer un piège (ovale vert)',
+    action: ()=>{
+      const b = backTile(pl);
+      if (isInterior(b.tx,b.ty) && Game.grid[b.ty][b.tx]!==1){
+        Game.grid[b.ty][b.tx]=4;
+        Game.traps.push({x:b.tx,y:b.ty,t:1});
+        refreshPelletCell(b.tx,b.ty);
+        sfxPower();
+      }
+    }
+  });
+}
 
   return entries;
 }
@@ -791,8 +801,19 @@ function powerPanelConfirm(pl){
   const entries = getPowerPanelEntries(pl);
   const i = (pl.panelSel|0);
   if (entries[i] && typeof entries[i].action === 'function') entries[i].action();
-}
 
+  // Fermeture immédiate + mobilité, même si < 10s
+  pl.powerTimer = 0;
+  pl.inputLocked = false;
+  pl.panelActive = false;
+  pl.invisible = false;
+  pl.hiddenFromParasites = false;
+
+  const el = (pl.pid===1?UI.power1:UI.power2);
+  if (el) el.textContent = '—';
+
+  closePowerPanel(pl);
+}
   
 function openPowerPanel(pl){
   closePowerPanel(pl); // sécurité
@@ -1102,6 +1123,13 @@ const Game={
 };
 
 function gridDims(){ const rows=Array.isArray(Game.grid)?Game.grid.length:0; const cols=rows>0 && Array.isArray(Game.grid[0])?Game.grid[0].length:0; return {cols,rows}; }
+
+function isCoopWithStropharia(){
+  return Game.mode==='duo' &&
+    ((Game.p1 && Game.p1.species.id==='stropharia') ||
+     (Game.p2 && Game.p2.species.id==='stropharia'));
+}
+  
 
 /* =================== VORTEX : placement proche des angles + carving =================== */
 
@@ -1645,6 +1673,23 @@ function neighborsForParasite(tx,ty){
     .filter(p=>isWalkableForParasite(p[0],p[1]));
 }
 
+function getFacingDir(pl){
+  if (pl && pl._lastDir && (pl._lastDir[0] || pl._lastDir[1])) return pl._lastDir.slice(0);
+  if (pl && (pl.dir[0] || pl.dir[1])) return pl.dir.slice(0);
+  if (pl && (pl.nextDir[0] || pl.nextDir[1])) return pl.nextDir.slice(0);
+  return [0,-1]; // défaut: regarde vers le haut
+}
+function frontTile(pl){
+  const d=getFacingDir(pl); return { tx: Math.floor(pl.x)+d[0], ty: Math.floor(pl.y)+d[1] };
+}
+function backTile(pl){
+  const d=getFacingDir(pl); return { tx: Math.floor(pl.x)-d[0], ty: Math.floor(pl.y)-d[1] };
+}
+function isInterior(x,y){
+  const dm=gridDims(); return (x>0 && y>0 && x<dm.cols-1 && y<dm.rows-1);
+}
+  
+
 function addPelletCell(x,y){
   if(!Game.pelletsLayer) return;
   const pctx=Game.pelletsLayer.getContext('2d');
@@ -1680,6 +1725,12 @@ function countReachableSporesFrom(gx,gy){
 function safeSetWallWithAntiSeal(x,y, oppPlayer){
   const prev = Game.grid[y][x];
   Game.grid[y][x] = 1;
+  // Nettoie un éventuel bonus/piège avalé par le mur
+const bi = Game.bonuses.findIndex(b=>b.x===x && b.y===y);
+if (bi>=0) Game.bonuses.splice(bi,1);
+const ti = Game.traps.findIndex(t=>t.x===x && t.y===y);
+if (ti>=0) Game.traps.splice(ti,1);
+
   redrawWallIfAny(x,y);
 
   const oppGX = Math.floor(oppPlayer.x), oppGY = Math.floor(oppPlayer.y);
@@ -2412,21 +2463,35 @@ if (Game.mode === 'duo' && Game.p2) autoUnsealIfRegionCleared(Game.p2);
 // Fin de niveau / match
 if (Game.remaining <= 0) {
   sfxWin();
-  if (Game.mode === 'duo') {
-    const p1Alive = Game.lives1 >= 0;
-    const p2Alive = Game.lives2 >= 0;
+if (Game.mode === 'duo') {
+  const coop = isCoopWithStropharia();
+  const p1Alive = Game.lives1 >= 0;
+  const p2Alive = Game.lives2 >= 0;
 
-    // Les deux vivants -> gagnant au score
-    if (p1Alive && p2Alive) {
-      if (Game.score1 > Game.score2) { endMatch('Fin — J1 gagne au score !'); return; }
-      if (Game.score2 > Game.score1) { endMatch('Fin — J2 gagne au score !'); return; }
-      endMatch('Fin — Égalité parfaite !'); return;
+  if (coop){
+    if (p1Alive && p2Alive){
+      const teamScore = Math.max(Game.score1, Game.score2);
+      Game.score1 = teamScore; UI.score1.textContent = Game.score1;
+      Game.score2 = teamScore; UI.score2.textContent = Game.score2;
+      updateLeaderHUD();
+      endMatch('Victoire coopérative !');
+      return;
+    } else {
+      endMatch('Défaite — vous perdez ensemble');
+      return;
     }
-
-    // Si l’un est déjà mort, le "dernier vivant" a déjà été géré dans playerHit()
-    endMatch('Fin — Partie terminée');
-    return;
   }
+
+  // mode compétitif (inchangé)
+  if (p1Alive && p2Alive) {
+    if (Game.score1 > Game.score2) { endMatch('Fin — J1 gagne au score !'); return; }
+    if (Game.score2 > Game.score1) { endMatch('Fin — J2 gagne au score !'); return; }
+    endMatch('Fin — Égalité parfaite !'); return;
+  }
+  endMatch('Fin — Partie terminée');
+  return;
+}
+
 
   // SOLO : une seule carte -> fin simple
   endMatch('Victoire !');
@@ -2553,32 +2618,31 @@ function playerHit(pl, hitter){
   if(pl.pid===1){ Game.lives1--; UI.lives1.textContent=Game.lives1; }
   else { Game.lives2--; UI.lives2.textContent=Game.lives2; }
 
-  // Victoire immédiate en duo (dernier vivant)
-  if(Game.mode==='duo'){
-    const p1Alive=Game.lives1>=0, p2Alive=Game.lives2>=0;
+// Duo : condition "dernier vivant"
+if (Game.mode==='duo'){
+  const coop = isCoopWithStropharia();
+  const p1Alive = Game.lives1 >= 0;
+  const p2Alive = Game.lives2 >= 0;
+
+  if (coop){
+    if (!p1Alive || !p2Alive){
+      const teamScore = Math.max(Game.score1, Game.score2);
+      Game.score1 = teamScore; UI.score1.textContent = Game.score1;
+      Game.score2 = teamScore; UI.score2.textContent = Game.score2;
+      updateLeaderHUD();
+      endMatch('Défaite — vous perdez ensemble');
+      return;
+    }
+  } else {
     if(!p1Alive && p2Alive){ endMatch('J2 gagne — dernier vivant !'); return; }
     if(!p2Alive && p1Alive){ endMatch('J1 gagne — dernier vivant !'); return; }
   }
+}
 
-  // Solo : reset complet si vies < 0
-if ((pl.pid===1 ? Game.lives1 : Game.lives2) < 0) {
-  // Remise à zéro des états volatils des joueurs (garantit 0s d’invisibilité Trompette)
-  if (Game.p1) resetPlayerRuntimeState(Game.p1);
-  if (Game.p2) resetPlayerRuntimeState(Game.p2); // (au cas où p2 existe, même en solo c’est inoffensif)
 
-  // Nettoie l’affichage des pouvoirs
-  UI.power1.textContent = '—';
-  UI.power2.textContent = '—';
-
-  // Reset score/vies/niveau SOLO
-  Game.lives1 = 3;
-  Game.score1 = 0;
-  LEVEL_INDEX = 0;
-  UI.lives1.textContent = Game.lives1;
-  UI.score1.textContent = Game.score1;
-
-  // Recharge le niveau 1 (tout est sain)
-  loadLevel(LEVEL_INDEX);
+// SOLO : si on perd, on montre quand même le score puis on propose Rejouer
+if (Game.mode!=='duo' && (pl.pid===1 ? Game.lives1 : Game.lives2) < 0) {
+  endMatch('Défaite !');
   return;
 }
 
@@ -2713,6 +2777,8 @@ function updatePlayer(pl, dt){
       pl.x += clamp(cx - pl.x, -0.3, 0.3) * 0.6;
     }
   }
+
+  if (pl.dir[0] || pl.dir[1]) pl._lastDir = pl.dir.slice(0);
 
   // --- Tuile courante ---
   const ntX = Math.floor(pl.x), ntY = Math.floor(pl.y);
