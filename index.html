@@ -532,9 +532,9 @@ function drawParasiteSprite(p){
 const Species = [
 {
   id: 'cornucopioides',
-  name: "Trompette de la mort",
-  power: "Voile d'ombre",
-  desc: "Devient invisible (la durée augmente en collectant les spores) mais se déplace plus lentement.",
+  name: 'Trompette de la mort',
+  power: 'Voile d'ombre',
+  desc: 'Devient invisible (la durée augmente en collectant les spores) mais se déplace plus lentement.',
   color: '#3d3630',
   draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
   use: (me) => {
@@ -562,7 +562,7 @@ const Species = [
     id: 'muscaria',
     name: 'Amanite tue-mouches',
     power: 'Piège mycotique',
-    desc: "Pose des pièges qui téléportent les parasites ailleurs sur la carte.",
+    desc: 'Pose des pièges qui téléportent les parasites ailleurs sur la carte.',
     color: '#c81d1d',
     draw: drawAmanita,
     use: (me) => {
@@ -577,7 +577,7 @@ const Species = [
     id: 'cibarius',
     name: 'Girolle',
     power: 'Serviteur parasite',
-    desc: "Peut capturer un parasite et le transforme temporairement en allié collecteur.",
+    desc: 'Peut capturer un parasite et le transforme temporairement en allié collecteur.',
     color: '#e6a100',
     draw: drawChanterelle,
     use: (me) => {
@@ -595,7 +595,7 @@ const Species = [
     id: 'edulis',
     name: 'Cèpe',
     power: 'Robustesse',
-    desc: "Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.",
+    desc: 'Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.',
     color: '#7a4f2a',
     draw: drawCep,
     use: (me) => { me.powerTimer=360; me.shield=true; }
@@ -605,7 +605,7 @@ const Species = [
     id: 'morchella',
     name: 'Morille',
     power: 'Spores du chaos',
-    desc: "Libère des spores qui désorientent les parasites et troublent l’adversaire.",
+    desc: 'Libère des spores qui désorientent les parasites et troublent l’adversaire.',
     color: '#6a4f2f',
     draw: drawMorel,
     use: (me) => {
@@ -643,7 +643,7 @@ const Species = [
   id: 'phalloides',
   name: 'Amanite phalloïde',
   power: 'Phase mycélienne',
-  desc: "Peut traverser une rangée d'arbres (mur intérieur du labyrinthe).",
+  desc: `Peut traverser une rangée d'arbres (mur intérieur du labyrinthe).`,
   color: '#7a8b4b',
   draw: drawPhalloides,
   use: (me) => {
@@ -658,7 +658,7 @@ const Species = [
   id: 'stropharia',
   name: 'Strophaire Vert-de-gris',
   power: 'Assitance symbiotique',
-  desc: "Coopère avec l'autre champignon et l'assiste pour ne pas qu'il se fasse dévorer par les parasites",
+  desc: 'Coopère avec l'autre champignon et l'assiste pour ne pas qu'il se fasse dévorer par les parasites',
   color: '#6bb08f',
   draw: drawStropharia,
   use: ()=>{} // géré par triggerPower()
@@ -666,9 +666,9 @@ const Species = [
   
 {
   id: 'anthurus',
-  name: "Anthurus d'archer",
+  name: 'Anthurus d'archer',
   power: 'Extinction de la concurrence',
-  desc: "Allié des parasites, il met en place des pièges et des sabotages pour nuire au champignon adverse.",
+  desc: 'Allié des parasites, il met en place des pièges et des sabotages pour nuire au champignon adverse.',
   color: '#b04a6b',
   draw: drawAnthurus,
   use: ()=>{} // géré par triggerPower()
