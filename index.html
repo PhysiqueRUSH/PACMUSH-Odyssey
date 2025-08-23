@@ -849,7 +849,10 @@ function openPowerPanel(pl){
       item.style.cssText='padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:8px;cursor:pointer;background:#0e0b13;';
       if(i===pl.panelSel){ item.style.outline='2px solid #8fd0ff'; item.style.boxShadow='0 0 0 3px #8fd0ff33'; }
       item.textContent = e.label;
-      item.onclick = e.action;
+      item.onclick = () => { 
+   pl.panelSel = i;          // s'assurer qu'on confirme le bon choix
+   powerPanelConfirm(pl);    // lance l'action + ferme le panneau + rend le joueur mobile
+ };
       list.appendChild(item);
     });
   }
