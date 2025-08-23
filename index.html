@@ -199,11 +199,12 @@ function anyPanelOpen(){
 addEventListener('keydown', (e)=>{
   const k = e.key.toLowerCase();
 
-  // Ne bloque que les touches du joueur dont le panneau est ouvert
-  const j1Keys = ['arrowup','arrowdown','arrowleft','arrowright','enter'];
-  const j2Keys = ['z','q','s','d','f'];
-  if (Game?.p1?.panelActive && j1Keys.includes(k)) { e.preventDefault(); e.stopPropagation(); return; }
-  if (Game?.p2?.panelActive && j2Keys.includes(k)) { e.preventDefault(); e.stopPropagation(); return; }
+  // Si un panneau est ouvert, on ne laisse PAS ce listener gérer ces touches
+  if (anyPanelOpen() && ['arrowup','arrowdown','arrowleft','arrowright','enter','f','z','q','s','d'].includes(k)) {
+    e.preventDefault();
+    e.stopPropagation();
+    return; // pas de Keys[k]=true ici !
+  }
 
   Keys[k] = true;
 
@@ -248,11 +249,10 @@ if (k === 'p') {
 addEventListener('keyup', (e)=>{
   const k = e.key.toLowerCase();
 
-  const j1Keys = ['arrowup','arrowdown','arrowleft','arrowright','enter'];
-  const j2Keys = ['z','q','s','d','f'];
-  if (Game?.p1?.panelActive && j1Keys.includes(k)) { e.preventDefault(); e.stopPropagation(); }
-  if (Game?.p2?.panelActive && j2Keys.includes(k)) { e.preventDefault(); e.stopPropagation(); }
-
+  if (anyPanelOpen() && ['arrowup','arrowdown','arrowleft','arrowright','enter','f','z','q','s','d'].includes(k)) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
   Keys[k] = false;
 });
 
@@ -265,10 +265,6 @@ function triggerPower(pid){
   const pl = (pid===1 ? Game.p1 : Game.p2);
   if(!pl) return;
 
-  const now = performance.now();
-  const dbl = pl.hasPowerBoost && (now - (pl.lastPowerPressTime||0) < 280);
-  pl.lastPowerPressTime = now;
-
 // Si un panneau est déjà ouvert pour ce joueur → on ne fait rien ici
 if (pl.panelActive) return;
 
@@ -279,27 +275,6 @@ if (pl.panelActive) return;
   if (pl.species.id === 'phalloides' && pl.phaseCooldown > 0) return;
   if (pl.species.id === 'cornucopioides' && pl.trumpetCd > 0) return;
 
-  // Double-press : boost espèce (ne bloque pas l'activation normale)
-  if (dbl){
-    pl.hasPowerBoost = false; // consommé
-    // reset tous les flags
-    pl._trumpetBoost=pl._muscariaBurstUntil=pl._girolleBoost=pl._edulisBoost=pl._morilleBoost=pl._phalloidesBoost=pl._strophariaBoost=pl._anthurusBoost=false;
-
-    switch(pl.species.id){
-      case 'cornucopioides': pl._trumpetBoost = true; break;
-      case 'muscaria':       pl._muscariaBurstUntil = now + 15000; break; // 15 s
-      case 'cibarius':       pl._girolleBoost = true; break;
-      case 'edulis':         pl._edulisBoost = true; pl.shieldActive=true; pl.shieldHits=2; pl.shieldWindow=120; break;
-      case 'morchella':      pl._morilleBoost = true; break;
-      case 'phalloides':     pl._phalloidesBoost = true; break;
-      case 'stropharia':     pl._strophariaBoost = true; break;
-      case 'anthurus':       pl._anthurusBoost = true; break;
-    }
-    sfxPower();
-    // on n'interrompt PAS ici : la pression actuelle continue et peut lancer le pouvoir normal/panel
-  }
-
-  
   // === Cas spéciaux (champignons 7 & 8) ===
   // 7) Stropharia — panel coop de 10s, immobile + invisible pour les parasites
   if (pl.species.id === 'stropharia'){
@@ -600,8 +575,6 @@ const Species = [
     me.invisible  = true;    // indétectable pour l’IA
     me.speedBoost = 0.5;     // -50% de vitesse
     me.trumpetTrapImmune = false; // plus d’immunité aux pièges
-
-    if (me._trumpetBoost) me.trumpetTrapImmune = true;
   }
 },
 
@@ -613,25 +586,11 @@ const Species = [
   color: '#c81d1d',
   draw: drawAmanita,
   use: (me) => {
-  const tx = Math.floor(me.x), ty = Math.floor(me.y);
-  const q = Game.muscariaTraps[me.pid];
-  const now = performance.now();
-
-  // En "burst" boosté (voir §6.2), on empile sans retirer
-  const inBurst = (me._muscariaBurstUntil && now < me._muscariaBurstUntil);
-
-  // Ajoute le nouveau piège TP
-  q.push({x:tx,y:ty,active:true, t: 'tp', createdAt: now});
-
-  // Hors burst : garde au plus 1 (supprime le plus ancien)
-  if (!inBurst && q.length > 1) {
-    const dead = q.shift();
-    // visuel : rien à faire, ce ne sont pas des cases de la grille
+    const tx = Math.floor(me.x), ty = Math.floor(me.y);
+    if (me.pid===1) Game.muscariaTrap1 = {x:tx,y:ty,active:true};
+    else            Game.muscariaTrap2 = {x:tx,y:ty,active:true};
+    me.powerTimer = 120;
   }
-
-  me.powerTimer = 120; // petit feedback
-}
-
 },
 
 {
@@ -642,10 +601,9 @@ const Species = [
   color: '#e6a100',
   draw: drawChanterelle,
   use: (me) => {
-  const extra = me._girolleBoost ? (5*60) : 0;
-  me.powerTimer = (15*60) + extra;   // 15s (+5s boost)
-  me.hunterWindow = 600 + extra;     // fenêtre de capture
-  UI[me.pid===1 ? 'power1' : 'power2'].textContent = 'Serviteur ?';
+    me.powerTimer = 15*60;   // ~15s
+    me.hunterWindow = 600;   // fenêtre de capture (10s)
+    UI[me.pid===1 ? 'power1' : 'power2'].textContent = 'Serviteur ?';
 
     Game.girollePanic.active = true;
     Game.girollePanic.ownerPid = me.pid;
@@ -660,12 +618,7 @@ const Species = [
   desc: 'Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.',
   color: '#7a4f2a',
   draw: drawCep,
-  use: (me) => {
-  me.powerTimer = 360;           // 6 s visuel/halo inchangé
-  me.shieldActive = true;        // bouclier armé
-  me.shieldHits   = 2;           // 2 contacts autorisés
-  me.shieldWindow = 120;         // ... si rapprochés (< 2 s)
-}
+  use: (me) => { me.powerTimer=360; me.shield=true; }
 },
 
 {
@@ -676,38 +629,32 @@ const Species = [
   color: '#6a4f2f',
   draw: drawMorel,
   use: (me) => {
-  const base = 600;                    // 10 s
-  const extra = me._morilleBoost ? base*2 : 0; // +20 s si boost (total 30 s)
-  me.powerTimer = base + extra;
+    me.powerTimer = 600; // 10s d'aura
+    const radTiles = Math.max(1, Math.floor(0.20 * Math.max(COLS, ROWS)));
+    const cx = me.x, cy = me.y;
 
-  const radTiles = me._morilleBoost
-    ? Math.max(COLS, ROWS)            // couvre tout le labyrinthe
-    : Math.max(1, Math.floor(0.20 * Math.max(COLS, ROWS)));
+    Game.parasites.forEach(p => {
+      if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
+        p.morilleChaos = 600;
+        p.morilleOwner = me.pid;
+        p.morilleNextSwitch = 0;
+        p.morilleMode = null;
+      }
+    });
+    spawnSporeCloud(me.x, me.y, radTiles);
 
-  const cx = me.x, cy = me.y;
-
-  Game.parasites.forEach(p => {
-    if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
-      p.morilleChaos = 600;
-      p.morilleOwner = me.pid;
-      p.morilleNextSwitch = 0;
-      p.morilleMode = null;
-    }
-  });
-  spawnSporeCloud(me.x, me.y, radTiles);
-
-  if (Game.mode === 'duo') {
-    const foe = (me.pid === 1) ? Game.p2 : Game.p1;
-    if (foe) {
-      const dist = Math.hypot(foe.x - cx, foe.y - cy);
-      if (dist <= radTiles) {
-        foe.madnessTimer = 300; // 5s @60fps
-        sfxPower();
-        foe.glowTimer = Math.max(foe.glowTimer||0, 60);
+    if (Game.mode === 'duo') {
+      const foe = (me.pid === 1) ? Game.p2 : Game.p1;
+      if (foe) {
+        const dist = Math.hypot(foe.x - cx, foe.y - cy);
+        if (dist <= radTiles) {
+          foe.madnessTimer = 300; // 5s @60fps
+          sfxPower();
+          foe.glowTimer = Math.max(foe.glowTimer||0, 60);
+        }
       }
     }
   }
-}
 },
 
 {
@@ -722,12 +669,6 @@ const Species = [
     me.phase = true;
     me.phaseInsideWall = false;
     me.powerTimer = 99999; // on coupera après sortie du 1er mur
-      if (me._phalloidesBoost){
-      me.powerTimer = 1200;     // 20 s
-      me.phase = true;          // reste “on”
-      me._phalloidesFree = true;
-    }
-
   }
 },
 
@@ -802,9 +743,21 @@ function renderChoices(){
   const isDuo = (UI.overlay?.querySelector('input[name="modeSel"]:checked')?.value === 'duo');
   const list = isDuo ? Species : Species.filter(s => s.id!=='stropharia' && s.id!=='anthurus');
 
-  if(UI.choices1){ UI.choices1.innerHTML=''; list.forEach(sp=>UI.choices1.appendChild(buildChoiceCard(sp,1))); }
-  if(UI.choices2){ UI.choices2.innerHTML=''; list.forEach(sp=>UI.choices2.appendChild(buildChoiceCard(sp,2))); }
+  // J1 : toujours affiché
+  if(UI.choices1){
+    UI.choices1.innerHTML='';
+    list.forEach(sp=>UI.choices1.appendChild(buildChoiceCard(sp,1)));
+  }
+
+  // J2 : uniquement en mode duo
+  if(UI.choices2){
+    UI.choices2.innerHTML='';
+    if(isDuo){
+      list.forEach(sp=>UI.choices2.appendChild(buildChoiceCard(sp,2)));
+    }
+  }
 }
+
 
 function updateStartButtonState(){
   if(!UI.overlay) return false;
@@ -845,24 +798,18 @@ function attachOverlayEvents(ov){
       startGame();
     });
   }
- ov.addEventListener('change',(e)=>{
-  if (e.target && e.target.name === 'modeSel'){
-    const duo = (e.target.value === 'duo');
+  ov.addEventListener('change',(e)=>{
+  if(e.target && e.target.name==='modeSel'){
+  renderChoices();
+  updateStartButtonState();
 
-    // on récupère directement nos deux éléments par leur id
-    const sec2  = ov.querySelector('#secVar2');
-    const grid2 = ov.querySelector('#choices2');
+  // Toggle visibilité J2 selon le mode
+  const duo = (ov.querySelector('input[name="modeSel"]:checked')?.value === 'duo');
+  ov.querySelector('#secVar2').style.display = duo ? '' : 'none';
+  ov.querySelector('#choices2').style.display = duo ? 'grid' : 'none';
+}
 
-    if (sec2 && grid2){
-      sec2.style.display  = duo ? '' : 'none';
-      grid2.style.display = duo ? '' : 'none';
-    }
-
-    renderChoices();
-    updateStartButtonState();
-  }
-});
-
+  });
  ov.addEventListener('keydown', (e)=>{
   if ((e.key === 'Enter' || e.key === ' ') && updateStartButtonState()){
     e.preventDefault();
@@ -948,42 +895,6 @@ if (pl.species.id === 'stropharia'){
     label: 'Désactiver pièges à proximité',
     action: ()=>{ disableNearbyTraps(tx,ty,3); sfxPower(); }
   });
-  entries.push({
-  label: 'Spores hallucinogènes (15s)',
-  action: ()=>{
-    const foe = (pl.pid===1 ? Game.p2 : Game.p1);
-    if (!foe) return;
-    Game.mirage.active   = true;
-    Game.mirage.ownerPid = pl.pid;
-    Game.mirage.followPid= foe.pid;
-    Game.mirage.timer    = 15*60;
-
-    // Tag 50% des parasites pour les "leurer"
-    Game.parasites.forEach(p=>{
-      if (Math.random() < 0.5){
-        p.luredMirage = 15*60;   // compteur en frames
-      }
-    });
-    sfxPower();
-  }
-});
-
-if (pl._strophariaBoost){
-  entries.push({
-    label: 'Semer la vie (x2)',
-    action: ()=>{
-      const b = backTile(pl);
-      if (isInterior(b.tx,b.ty) && Game.grid[b.ty][b.tx]!==1){
-        Game.grid[b.ty][b.tx] = 3; // marquer la case "bonus"
-        refreshPelletCell(b.tx,b.ty);
-        // Empile 2 coeurs sur la même case
-        Game.bonuses.push({x:b.tx, y:b.ty, kind:'life'});
-        Game.bonuses.push({x:b.tx, y:b.ty, kind:'life', _stacked:true});
-        sfxPower();
-      }
-    }
-  });
-}
 }
 
 
@@ -1032,15 +943,6 @@ if (pl._strophariaBoost){
       }
     }
   });
-   if (pl.species.id === 'anthurus' && pl._anthurusBoost){
-  entries.push({
-    label: 'Prolifération fongique (chasseur)',
-    action: ()=>{
-      spawnHunterPhalloide(pl);
-      sfxPower();
-    }
-  });
-}
 }
 
   return entries;
@@ -1187,19 +1089,8 @@ function createOverlay(){
   // Choix champignons
   const secVar1=document.createElement('div'); secVar1.className='sectionTitle'; secVar1.textContent='Joueur 1 — Variété';
   const grid1=document.createElement('div'); grid1.id='choices1'; grid1.className='grid';
- const secVar2 = document.createElement('div');
-secVar2.className = 'sectionTitle';
-secVar2.id = 'secVar2'; // << ajout d'un id pour l'atteindre facilement
-secVar2.textContent = 'Joueur 2 — Variété (mode 2J)';
-
-const grid2 = document.createElement('div');
-grid2.id = 'choices2';
-grid2.className = 'grid';
-
-// SOLO par défaut -> on masque la section et la grille de choix J2
-secVar2.style.display = 'none';
-grid2.style.display = 'none';
-
+  const secVar2=document.createElement('div'); secVar2.className='sectionTitle'; secVar2.id='secVar2'; secVar2.textContent='Joueur 2 — Variété (mode 2J)';
+  const grid2=document.createElement('div'); grid2.id='choices2'; grid2.className='grid';
 
   const footer=document.createElement('div'); footer.className='row'; footer.style.justifyContent='space-between'; footer.style.marginTop='12px';
   const rowL=document.createElement('div'); rowL.className='row';
@@ -1218,6 +1109,11 @@ grid2.style.display = 'none';
   UI.overlay=ov; UI.choices1=grid1; UI.choices2=grid2; UI.startBtn=btn; attachOverlayEvents(ov);
   renderChoices(); updateStartButtonState();
   setTimeout(()=>ov.focus(),0);
+
+  // Cache J2 si on est en Solo au chargement
+const duoInit = ov.querySelector('input[name="modeSel"]:checked')?.value === 'duo';
+ov.querySelector('#secVar2').style.display = duoInit ? '' : 'none';
+ov.querySelector('#choices2').style.display = duoInit ? 'grid' : 'none';
 }
 
 function openOverlay(){
@@ -1396,11 +1292,9 @@ const Game={
   score1:0, score2:0, lives1:3, lives2:3,
   paused:false, countdown:0,
   traps:[], bonuses:[], parasites:[], particles:[], vortexes:[], 
-  muscariaTraps: { 1: [], 2: [] }, // files FIFO de pièges TP Amanite (par joueur)
+  muscariaTrap1:null, muscariaTrap2:null,
   p1:null, p2:null,
   servant1:null, servant2:null,
-  mirage: { active:false, ownerPid:0, followPid:0, timer:0 }, // mirage Stropharia
-  hunters: [],                                                // chasseurs “phalloïdes” (anthurus boost)
   blindGlobal:0,
   levelsToPlay: MATCH_LEVELS_SOLO,
   girollePanic:{active:false, ownerPid:0},
@@ -1591,32 +1485,6 @@ Game.grid = genLevel(seed);
   }
 
   const count= (6+Math.floor(i*0.8));
-
-  // === Quotas power (facile:4 / moyen:3 / difficile:2) ===
-  const targetPower =
-    (SelectedDifficulty.id==='easy') ? 4 :
-    (SelectedDifficulty.id==='medium') ? 3 : 2;
-
-  // 1) compter & lister index des bonus
-  const powerIdx = [];
-  const nonPowerIdx = [];
-  for (let bi=0; bi<Game.bonuses.length; bi++){
-    if (Game.bonuses[bi].kind==='power') powerIdx.push(bi);
-    else nonPowerIdx.push(bi);
-  }
-  // 2) si trop : convertir l'excédent en 'score'
-  while (powerIdx.length > targetPower){
-    const bi = powerIdx.shift();
-    Game.bonuses[bi].kind = 'score';
-  }
-  // 3) si pas assez : convertir des non-power aléatoires en power
-  while (powerIdx.length < targetPower && nonPowerIdx.length){
-    const pickIdx = nonPowerIdx.splice((Math.random()*nonPowerIdx.length)|0,1)[0];
-    Game.bonuses[pickIdx].kind = 'power';
-    powerIdx.push(pickIdx);
-  }
-
-  
   for(let k=0;k<count;k++){
     const pos=findOpenTile();
 const base = enemyBaseSpeedAt(i);
@@ -1729,19 +1597,10 @@ function makePlayer(tx,ty,pid,species){
     speedBuffs: 0,     // ← nb de buffs "speed" actifs en parallèle
 
     size:0.9,
-    powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, shieldActive:false, shieldHits:0, shieldWindow:0, phase:false,
+    powerTimer:0, invisible:false, speedBoost:1, spinning:false, shield:false, phase:false,
     frozenTimer:0, anim:0, nextPowerExtend:0, girolleTrapImmune:false, phaseCooldown:0, phaseInsideWall:false, hunterWindow:0, trumpetTrapImmune:false,
     respawnFlash: 0, hitGrace: 0, tpGrace: 0, spinTimer: 0, spinPhase: 0, glowTimer: 0, invulnTimer: 0, collectedSpores:0,
-    trumpetCd:0, madnessTimer:0, hasPowerBoost:false, lastPowerPressTime:0,
-    // flags d’effets boost selon espèce :
-    _trumpetBoost:false,
-    _muscariaBurstUntil:0,
-    _girolleBoost:false,
-    _edulisBoost:false,
-    _morilleBoost:false,
-    _phalloidesBoost:false,
-    _strophariaBoost:false,
-    _anthurusBoost:false,
+    trumpetCd:0, madnessTimer:0,
     panelActive:false,           // fenêtre latérale ouverte (immobile + rémap des touches)
     panelSel:0,                  // index en surbrillance dans la liste
     hiddenFromParasites:false,   // non-ciblable par l’IA parasite (ciblage)
@@ -1981,16 +1840,6 @@ function computeKnockbackTargetDir(origin, dir){
   }
   return { x:lastX, y:lastY };
 }
-
-  function knockbackPlayerInstant(victimPl, fromPl){
-  // cible "mur juste avant" dans la direction fromPl -> victim
-  const tgt = computeKnockbackTargetDir({x:victimPl.x, y:victimPl.y}, [victimPl.x - fromPl.x, victimPl.y - fromPl.y]);
-  victimPl.x = tgt.x; victimPl.y = tgt.y;
-  victimPl.dir = [0,0];
-  // petit flash
-  victimPl.glowTimer = Math.max(victimPl.glowTimer||0, 30);
-}
-
 
 // Construit le calque "sol" à partir de l'image 1024×1024
 function buildFloorLayer(){
@@ -2380,15 +2229,11 @@ function eatBonusFor(player,b){
 
   break;
 }
-        case 'power': {
-      // non cumulable
-      if (player.hasPowerBoost) break;
-      player.hasPowerBoost = true;
-      (player.pid===1?UI.power1:UI.power2).textContent='★ prêt';
-      sfxPower();
-      break;
-    }
 
+    case 'power':
+      player.nextPowerExtend=(player.nextPowerExtend||0)+120; // +2s
+      (player.pid===1?UI.power1:UI.power2).textContent='★ prêt (+2s)'; sfxPower();
+      break;
     case 'score':
       if(player.pid===1){ Game.score1+=500; UI.score1.textContent=Game.score1; }
   else { Game.score2+=500; UI.score2.textContent=Game.score2; }
@@ -2465,79 +2310,6 @@ function updateCountdown(){
   }
 }
 
-function isInteriorWall(x,y){
-  const dm = gridDims();
-  return x>0 && y>0 && x<dm.cols-1 && y<dm.rows-1 && Game.grid[y][x]===1;
-}
-
-function isWalkableForHunter(tx,ty,h){
-  // Le chasseur est comme un parasite, MAIS peut traverser un mur intérieur
-  if (tx<0 || ty<0) return false;
-  const dm = gridDims();
-  if (tx>=dm.cols || ty>=dm.rows) return false;
-  const v = Game.grid[ty][tx];
-  if (v===1){
-    if (h.phaseActive && isInteriorWall(tx,ty)) return true;
-    return false;
-  }
-  // Vortex = comme parasite (évite)
-  if (v===VORTEX && isVortexBlocked(tx,ty)) return false;
-  return true;
-}
-function neighborsForHunter(tx,ty,h){
-  return [[1,0],[-1,0],[0,1],[0,-1]]
-    .map(d=>[tx+d[0],ty+d[1]])
-    .filter(p=>isWalkableForHunter(p[0],p[1],h));
-}
-function bfsHunter(start, goal, h){
-  const key=(x,y)=>x+','+y;
-  const q=[start]; const came=new Map(); came.set(key(start[0],start[1]), null);
-  const ok=(x,y)=> isWalkableForHunter(x,y,h);
-  if(!ok(goal[0],goal[1])){
-    // vise un voisin "ok"
-    const ns=[[1,0],[-1,0],[0,1],[0,-1]].map(d=>[goal[0]+d[0], goal[1]+d[1]]).filter(p=>ok(p[0],p[1]));
-    if (!ns.length) return [];
-    goal = ns[0];
-  }
-  while(q.length){
-    const [x,y]=q.shift();
-    if(x===goal[0] && y===goal[1]) break;
-    const ns=neighborsForHunter(x,y,h);
-    for(const [nx,ny] of ns){
-      const k=key(nx,ny);
-      if(!came.has(k)){ came.set(k,[x,y]); q.push([nx,ny]); }
-    }
-  }
-  const path=[]; let cur=goal; const sKey=key(start[0],start[1]);
-  while(cur && key(cur[0],cur[1])!==sKey){
-    const prev=came.get(key(cur[0],cur[1])); if(!prev) break;
-    path.push(cur); cur=prev;
-  }
-  path.reverse(); return path;
-}
-
-function spawnHunterPhalloide(owner){
-  const foe = (owner.pid===1 ? Game.p2 : Game.p1);
-  if (!foe) return;
-  const pos = findOpenNear(Math.floor(owner.x), Math.floor(owner.y));
-  const base = enemyBaseSpeedAt(LEVEL_INDEX);
-  const h = {
-    x: pos.x + 0.5,
-    y: pos.y + 0.5,
-    dir: [0,0],
-    speed: base * SelectedDifficulty.factor * 1.1, // un poil plus rapide qu’un parasite
-    baseSpeed: base * SelectedDifficulty.factor * 1.1,
-    targetPid: foe.pid,
-    phaseActive: false,
-    phaseReady: true,      // peut traverser 1 “bloc mur” (une fois à la fois)
-    phaseInsideWall: false,
-    path: [],
-    faceAngle: angleFromDir4([0,-1])||0,
-    turnFromAngle:0, turnToAngle:0, turnTimer:0, turnDuration:6, pendingAngle:null
-  };
-  Game.hunters.push(h);
-}
-
 
 /* Update */
 function update(dt){
@@ -2551,16 +2323,8 @@ Game.parasites.forEach((p,idx)=>{
   // ⇨ MAJ orientation (quart de tour) en début de tick
   updateParasiteOrientation(p, dt);
 
-  // Mirage : vitesse doublée si leurré
-p.speed = p.baseSpeed * (p.luredMirage > 0 ? 2 : 1);
-if (p.luredMirage > 0) p.luredMirage--;
-
-
   if (p.tpGrace>0) p.tpGrace--;
   if (p.avoidVortex>0) p.avoidVortex--;
-
-    // contact joueur↔joueur (Cèpe peut repousser l'autre)
-  playersMutualContactCheck();
 
   // --- Gel global (freeze bonus) : immobile mais toujours dangereux si on le touche
   if (p.frozen > 0) {
@@ -2587,25 +2351,6 @@ if (p.luredMirage > 0) p.luredMirage--;
         p.x = p.kbTx; p.y = p.kbTy;
         p.kbActive = false;
         p.confusedTimer = Math.max(p.confusedTimer, 180);
-                // Si knockback vient d'un Cèpe boosté : casse le mur touché + 50% de kill
-        if (p.kbFromEdulis){
-          // casse le mur le plus proche autour de la position atteinte
-          const gx = Math.floor(p.x), gy = Math.floor(p.y);
-          const cand = [[1,0],[-1,0],[0,1],[0,-1]]
-            .map(d=>[gx+d[0],gy+d[1]])
-            .find(([x,y])=> Game.grid[y] && Game.grid[y][x]===1);
-          if (cand) {
-            Game.grid[cand[1]][cand[0]] = 0;
-            redrawWallIfAny(cand[0], cand[1]);
-          }
-          if (p.kbFromEdulisBoost && Math.random() < 0.5){
-            // “élimination” définitive
-            const idxKill = Game.parasites.indexOf(p);
-            if (idxKill>=0){ Game.parasites.splice(idxKill,1); return; }
-          }
-          p.kbFromEdulis = false; p.kbFromEdulisBoost = false;
-        }
-
       } else {
         p.x += nx * spd;
         p.y += ny * spd;
@@ -2683,21 +2428,15 @@ if (Game.grid[eTile[1]] && Game.grid[eTile[1]][eTile[0]] === VORTEX && !isVortex
 }
 
 
-// pièges Amanite (si non serviteur) — multi-par joueur
-if(!p.servant){
-  [1,2].forEach(pid=>{
-    const arr = Game.muscariaTraps[pid]||[];
-    for (let i=0;i<arr.length;i++){
-      const t = arr[i];
-      if (t.active && eTile[0]===t.x && eTile[1]===t.y){
-        const rt=randomOpenTile();
-        p.x=rt[0]+0.5; p.y=rt[1]+0.5; p.path=[]; p.lastSeen=null; p.chaosTarget=null;
-        p.tpGrace = 20; p.avoidVortex = 120;
-        return; // une fois téléporté, on sort
+    // pièges Amanite (si non serviteur)
+    if(!p.servant){
+      if(Game.muscariaTrap1 && Game.muscariaTrap1.active && eTile[0]===Game.muscariaTrap1.x && eTile[1]===Game.muscariaTrap1.y){
+        const rt=randomOpenTile(); p.x=rt[0]+0.5; p.y=rt[1]+0.5; p.path=[]; p.lastSeen=null; p.chaosTarget=null;
+      }
+      if(Game.muscariaTrap2 && Game.muscariaTrap2.active && eTile[0]===Game.muscariaTrap2.x && eTile[1]===Game.muscariaTrap2.y){
+        const rt=randomOpenTile(); p.x=rt[0]+0.5; p.y=rt[1]+0.5; p.path=[]; p.lastSeen=null; p.chaosTarget=null;
       }
     }
-  });
-}
 
     // Fuite spécifique quand la Girolle a activé son pouvoir
 if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
@@ -2725,19 +2464,6 @@ if (Game.girollePanic.active && p.fleeGirolle > 0 && !p.servant) {
   return; // on court-circuite les autres IA (serviteur/aveugle/chaos/normal)
 }
 
-// Mirage Stropharia : attirance prioritaire vers le mirage
-if (p.luredMirage > 0 && Game.mirage.active){
-  const targetPl = (Game.mirage.followPid===1) ? Game.p1 : Game.p2;
-  if (targetPl){
-    const tgx = Math.floor(targetPl.x), tgy = Math.floor(targetPl.y);
-    chaseViaPath(p, tgx, tgy, 1.0, dt);  // suit la "fausse" cible
-    safeClampParasite(p);
-    parasiteHitPlayers(p);
-    return; // court-circuite les autres IA ce tick
-  }
-}
-
-  
 // --- CHAOS Morille (local et cadencé) ---
 if (p.morilleChaos > 0) {
   p.morilleChaos--;
@@ -2971,54 +2697,6 @@ if (!p.path || p.path.length === 0) {
     parasiteHitPlayers(p);
   });
 
-
-// === HUNTERS (Phalloïdes autonomes) ===
-Game.hunters = Game.hunters || [];
-Game.hunters.forEach(h=>{
-  // MAJ orientation fluide
-  updateParasiteOrientation(h, dt);
-
-  const foe = (h.targetPid===1) ? Game.p1 : Game.p2;
-  if(!foe) return;
-
-  // logique "phase": si prochain pas bloque et phase dispo -> active
-  const eTile=[Math.floor(h.x), Math.floor(h.y)];
-  const tTile=[Math.floor(foe.x), Math.floor(foe.y)];
-  let path = bfsHunter(eTile, tTile, h);
-
-  if ((!path || !path.length) && h.phaseReady){
-    // active le passage dans 1 mur pour forcer un chemin
-    h.phaseActive = true; h.phaseReady = false;
-    path = bfsHunter(eTile, tTile, h);
-  }
-
-  // sortir du mur = désactiver la phase
-  const isWall = isInteriorWall(Math.floor(h.x), Math.floor(h.y));
-  if (!isWall && h.phaseActive && h.phaseInsideWall){
-    h.phaseActive = false;
-    h.phaseInsideWall = false;
-    // recharge la phase après un petit délai ? (optionnel)
-    setTimeout(()=>{ h.phaseReady = true; }, 4000);
-  }
-  if (isWall) h.phaseInsideWall = true;
-
-  // déplacement (comme parasite)
-  const spd=h.speed*dt;
-  if (path && path.length){
-    const [nx,ny]=path[0];
-    const tx=nx+0.5, ty=ny+0.5;
-    const dx=tx-h.x, dy=ty-h.y, len=Math.hypot(dx,dy)||1;
-    h.x += (dx/len)*spd; h.y += (dy/len)*spd; h.dir=[Math.sign(dx),Math.sign(dy)];
-    if (Math.abs(h.x-tx)<0.05 && Math.abs(h.y-ty)<0.05){ h.x=tx; h.y=ty; path.shift(); }
-  }
-
-  // collision avec joueurs (comme un parasite)
-  if (distance(h.x,h.y, foe.x,foe.y) < 0.6){
-    playerHit(foe, h); // vulnérable aux pouvoirs adverses
-  }
-});
-
-  
   // Particules
   for(let i=Game.particles.length-1;i>=0;i--){
     const pa=Game.particles[i];
@@ -3054,15 +2732,6 @@ for (let i = Game.vortexes.length - 1; i >= 0; i--){
   }
 }
 
-// Timer Mirage
-if (Game.mirage.active){
-  Game.mirage.timer -= 1*dt;
-  if (Game.mirage.timer <= 0){
-    Game.mirage.active = false;
-    Game.parasites.forEach(p=> p.luredMirage = 0);
-  }
-}
-  
 
 if (Game.mode === 'duo') anthurusCatchCheck();
 // --- AUTO-UNSEAL : si la zone fermée d'un joueur est vidée, on casse le dernier mur
@@ -3146,26 +2815,6 @@ function parasiteHitPlayers(p){
   }
 }
 
-function playersMutualContactCheck(){
-  if (Game.mode!=='duo' || !Game.p1 || !Game.p2) return;
-  // distance de contact ~0.6 (comme parasites)
-  const d = distance(Game.p1.x, Game.p1.y, Game.p2.x, Game.p2.y);
-  if (d >= 0.6) return;
-
-  // Règles : le Cèpe repousse l'autre joueur, sauf si la cible est invisible ou Stropharia
-  const tryEdulisPush = (edulis, other) => {
-    if (!edulis || edulis.species.id!=='edulis') return;
-    if (!edulis.shieldActive) return;                 // pouvoir en cours requis
-    if (other.invisible) return;
-    if (other.species.id==='stropharia') return;
-    knockbackPlayerInstant(other, edulis);
-  };
-
-  tryEdulisPush(Game.p1, Game.p2);
-  tryEdulisPush(Game.p2, Game.p1);
-}
-
-  
 function anthurusCatchCheck(){
   if (Game.mode!=='duo') return;
   const A = (Game.p1 && Game.p1.species.id==='anthurus') ? Game.p1
@@ -3181,7 +2830,7 @@ function anthurusCatchCheck(){
 
   if (distance(A.x,A.y,V.x,V.y) < 0.6){
     // traite comme une touche de parasite (perte de vie + respawn)
-    playerHit(V, A);   // on passe l'attaquant (Anthurus) pour permettre le knockback côté Cèpe
+    playerHit(V, null);
   }
 }
 
@@ -3194,10 +2843,9 @@ function playerHit(pl, hitter){
     if (pl.hunterWindow > 0) {
       // Si on percute un parasite non-serviteur -> conversion immédiate
       if (hitter && !hitter.servant) {
-              // en boost : multiples serviteurs, sinon on libère l'existant
-      if (!pl._girolleBoost) releaseServant(pl.pid);
+        releaseServant(pl.pid);
         convertToServant(hitter, pl.pid);
-        if (!pl._girolleBoost) pl.hunterWindow = 0;  // en boost : conversions illimitées durant la chasse
+        pl.hunterWindow = 0;        // fin de la fenêtre de chasse
         pl.invulnTimer = 60;        // invulnérable encore 1 seconde
         (pl.pid===1?UI.power1:UI.power2).textContent='Serviteur ✓';
         sfxPower();
@@ -3220,48 +2868,30 @@ function playerHit(pl, hitter){
   if(pl.hitGrace>0) return;
 
   // Bouclier du Cèpe : ignore 1 coup + knockback ciblé (avec domino)
-  // Bouclier du Cèpe : immunisé + repousse, 2 coups possibles en < 2 s
-// Bouclier du Cèpe : immunisé + repousse, 2 coups possibles en < 2 s
-if (pl.species.id === 'edulis' && pl.shieldActive){
-  // on consomme 1 "charge"
-  if (pl.shieldHits > 0) pl.shieldHits--;
-  // ré-ouvre la fenêtre si on vient de consommer le 1er
-  if (pl.shieldWindow <= 0 && pl.shieldHits > 0) pl.shieldWindow = 120; // 2 s
-  pl.hitGrace = 45;  // ~0,75s anti re-touch
+  if(pl.shield){
+    pl.shield=false;
+    (pl.pid===1?UI.power1:UI.power2).textContent='—';
+    pl.hitGrace = 45;  // ~0,75s invulnérabilité
 
-  if (hitter){
-    // >>> JOUEUR (ex : Anthurus)
-    if (typeof hitter.pid === 'number') {
-      knockbackPlayerInstant(hitter, pl);
-    }
-    // >>> PARASITE
-    else {
+    if(hitter){
       const target = computeKnockbackTarget(hitter, pl);
       const dir = [ (target.x - hitter.x), (target.y - hitter.y) ];
       const len = Math.hypot(dir[0],dir[1])||1;
       hitter.kbActive = true;
       hitter.kbTx = target.x;
       hitter.kbTy = target.y;
-      hitter.kbSpeed = pl.speed * 2;
+      hitter.kbSpeed = pl.speed * 2;   // 2× la vitesse du champignon
       hitter.kbDir = [dir[0]/len, dir[1]/len];
       hitter.scared = Math.max(hitter.scared, 90);
       hitter.path = []; hitter.lastSeen = null;
-      // marqueur: knockback issu d'un cèpe boosté éventuel
-      hitter.kbFromEdulis = true;
-      hitter.kbFromEdulisBoost = !!pl._edulisBoost; // casse mur + 50% kill (géré ailleurs)
+    } else {
+      // fallback de sécurité
+      repelEnemiesAround(pl, 2.2, 0.9);
     }
-  } else {
-    // fallback : repousse l'adversaire si on n'a pas l'attaquant
-    const opponent = (pl===Game.p1 ? Game.p2 : Game.p1);
-    if (opponent) knockbackPlayerInstant(opponent, pl);
+
+    sfxPower();
+    return;
   }
-
-  sfxPower();
-  // on garde le bouclier tant qu'il reste des "hits" ET (fenêtre > 0 OU powerTimer > 0)
-  if (pl.shieldHits<=0 && pl.shieldWindow<=0) pl.shieldActive=false;
-  return;
-}
-
 
   sfxHit();
   if(pl.pid===1){ Game.lives1--; UI.lives1.textContent=Game.lives1; }
@@ -3318,13 +2948,6 @@ function updatePlayer(pl, dt){
   if (pl.invulnTimer  > 0) pl.invulnTimer--;
   if (pl.madnessTimer > 0) pl.madnessTimer--;
 
-  // Fenêtre du bouclier Edulis (2 s)
-  if (pl.species.id==='edulis' && pl.shieldActive){
-    if (pl.shieldWindow > 0) pl.shieldWindow--;
-    // on relâche si plus de fenêtre et plus de powerTimer
-    if (pl.shieldWindow<=0 && pl.shieldHits<=0) pl.shieldActive=false;
-  }
-
  // Garde-fou anti “panneau zombie”
   if (!pl.panelActive && pl._panelEl) {
   closePowerPanel(pl);
@@ -3346,9 +2969,7 @@ function updatePlayer(pl, dt){
 
   // Gestion d’expiration du pouvoir (tous champignons)
   if (pl.powerTimer > 0){
-        // Trompette boost : pause du chrono si immobile
-    const freezeTimer = (pl.species.id==='cornucopioides' && pl._trumpetBoost && pl.invisible && pl.dir[0]===0 && pl.dir[1]===0);
-    if (!freezeTimer) pl.powerTimer--;
+    pl.powerTimer--;
     if (pl.powerTimer <= 0){
       // extinction standard des effets
       pl.invisible = false; pl.speedBoost = 1; pl.shield = false; pl.phase = false;
@@ -3454,23 +3075,20 @@ function updatePlayer(pl, dt){
     }
   }
 
-// Phalloïde : fin automatique après traversée d’UN mur
-if (pl.species.id === 'phalloides' && pl.phase){
-  const isWall = !!(Game.grid[ntY] && Game.grid[ntY][ntX] === 1);
-  if (!pl.phaseInsideWall && isWall){
-    pl.phaseInsideWall = true;
-  } else if (pl.phaseInsideWall && !isWall){
-  pl.phaseInsideWall = false;
-  if (!pl._phalloidesBoost) {
-    pl.phase = false;
-    pl.powerTimer = 0;
-    pl.phaseCooldown = 300; // 5s
-    const el = (pl.pid === 1 ? UI.power1 : UI.power2);
-    if (el) el.textContent = '—';
+  // Phalloïde : fin automatique après traversée d’UN mur
+  if (pl.species.id === 'phalloides' && pl.phase){
+    const isWall = !!(Game.grid[ntY] && Game.grid[ntY][ntX] === 1);
+    if (!pl.phaseInsideWall && isWall){
+      pl.phaseInsideWall = true;
+    } else if (pl.phaseInsideWall && !isWall){
+      pl.phase = false;
+      pl.powerTimer = 0;
+      pl.phaseInsideWall = false;
+      pl.phaseCooldown = 300; // 5s
+      const el = (pl.pid === 1 ? UI.power1 : UI.power2);
+      if (el) el.textContent = '—';
+    }
   }
-}
-  }
-
 
   // --- Spores (tuile 2) ---
   if (Game.grid[ntY] && Game.grid[ntY][ntX] === 2){
@@ -3509,22 +3127,6 @@ if (pl.species.id === 'phalloides' && pl.phase){
     }
   }
 
-  
-    // Pièges TP Amanite (de l'adversaire) → téléporte aussi le joueur
-  const foePid = (pl.pid===1?2:1);
-  const traps = Game.muscariaTraps[foePid] || [];
-  for (let i=0;i<traps.length;i++){
-    const t = traps[i];
-    if (t.active && t.x===ntX && t.y===ntY){
-      const rt = randomOpenTile();
-      pl.x = rt[0]+0.5; pl.y = rt[1]+0.5; pl.dir=[0,0];
-      pl.tpGrace = 20; pl.glowTimer = Math.max(pl.glowTimer||0, 60);
-      sfxPower();
-      break;
-    }
-  }
-
-  
   // --- Pièges (tuile 4) ---
   if (Game.grid[ntY] && Game.grid[ntY][ntX] === 4){
     const idx = Game.traps.findIndex(t => t.x === ntX && t.y === ntY);
@@ -3578,31 +3180,6 @@ function drawPreStartBeacons(){
   if (Game.mode === 'duo') drawOne(Game.p2, 'J2');
 }
 
-function drawMirageGhost(){
-  if (!Game.mirage.active) return;
-  const targetPl = (Game.mirage.followPid===1) ? Game.p1 : Game.p2;
-  if (!targetPl) return;
-
-  const cx = targetPl.x * TILE, cy = targetPl.y * TILE, s = TILE*0.95;
-  const offsets = [[0,0],[4,2],[-3,-2]]; // léger dédoublement
-  CTX.save();
-  CTX.globalAlpha = 0.35;
-  offsets.forEach(([ox,oy])=>{
-    const drawMap = {
-      cornucopioides: drawTrumpet,
-      muscaria:       drawAmanita,
-      cibarius:       drawChanterelle,
-      edulis:         drawCep,
-      morchella:      drawMorel,
-      phalloides:     drawPhalloides,
-      stropharia:     drawStropharia,
-      anthurus:       drawAnthurus
-    };
-    const fn = drawMap[targetPl.species.id];
-    if (fn) fn(CTX, cx+ox, cy+oy, s, false, false);
-  });
-  CTX.restore();
-}
 
   
 /* Rendu */
@@ -3721,27 +3298,9 @@ Game.parasites.forEach(p=>{
   }
 });
 
-// mirage Stropharia (visuel)
-drawMirageGhost();
-  
+
   if(Game.p1) drawPlayerEntity(Game.p1);
   if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
-
-  // Mirage visuel (double flou/dédoublé)
-if (Game.mirage.active){
-  const ref = (Game.mirage.followPid===1) ? Game.p1 : Game.p2;
-  if (ref && ref.species && typeof ref.species.draw === 'function'){
-    const cx = ref.x * TILE, cy = ref.y * TILE;
-    CTX.save();
-    CTX.globalAlpha = 0.75;
-    CTX.filter = 'blur(2px)';
-    ref.species.draw(CTX, cx-4, cy, TILE*0.95, false, true);
-    ref.species.draw(CTX, cx+4, cy, TILE*0.95, false, true);
-    CTX.filter = 'none';
-    CTX.restore();
-  }
-}
-
 
  // État pré-départ / pause / compte à rebours
 if (Game.preStart) {
@@ -3791,26 +3350,16 @@ function drawTrapsAndBonuses(){
     else { CTX.beginPath(); CTX.ellipse(px,py,10,6,0,0,6.28); CTX.fillStyle='#7fbf7f88'; CTX.fill(); }
     CTX.restore();
   });
-  
-   // Pièges TP Amanite multi
-  [1,2].forEach(pid=>{
-    const arr = Game.muscariaTraps[pid]||[];
-    arr.forEach(t=>{
-      if(!t.active) return;
-      const px=t.x*TILE+TILE/2, py=t.y*TILE+TILE/2;
-      CTX.save();
-      CTX.beginPath(); CTX.arc(px,py,13,0,Math.PI*2);
-      const fill = (pid===1) ? 'rgba(255,64,128,0.18)' : 'rgba(64,128,255,0.18)';
-      const stroke = (pid===1) ? '#ff3b7a' : '#3b7aff';
-      const label = (pid===1) ? 'π1' : 'π2';
-      CTX.fillStyle=fill; CTX.fill();
-      CTX.lineWidth=3; CTX.strokeStyle=stroke; CTX.stroke();
-      CTX.font='bold 12px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle='#fff';
-      CTX.fillText(label,px,py);
-      CTX.restore();
-    });
-  });
-
+  if(Game.muscariaTrap1 && Game.muscariaTrap1.active){
+    const px=Game.muscariaTrap1.x*TILE+TILE/2, py=Game.muscariaTrap1.y*TILE+TILE/2;
+    CTX.save(); CTX.beginPath(); CTX.arc(px,py,13,0,Math.PI*2); CTX.fillStyle='rgba(255,64,128,0.18)'; CTX.fill();
+    CTX.lineWidth=3; CTX.strokeStyle='#ff3b7a'; CTX.stroke(); CTX.font='bold 12px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle='#ffd6e6'; CTX.fillText('π1',px,py); CTX.restore();
+  }
+  if(Game.muscariaTrap2 && Game.muscariaTrap2.active){
+    const px=Game.muscariaTrap2.x*TILE+TILE/2, py=Game.muscariaTrap2.y*TILE+TILE/2;
+    CTX.save(); CTX.beginPath(); CTX.arc(px,py,13,0,Math.PI*2); CTX.fillStyle='rgba(64,128,255,0.18)'; CTX.fill();
+    CTX.lineWidth=3; CTX.strokeStyle='#3b7aff'; CTX.stroke(); CTX.font='bold 12px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle'; CTX.fillStyle='#d6e0ff'; CTX.fillText('π2',px,py); CTX.restore();
+  }
   Game.bonuses.forEach(b=>{
     const px=b.x*TILE+TILE/2,py=b.y*TILE+TILE/2;
     CTX.save();
@@ -4091,4 +3640,3 @@ document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>
-
