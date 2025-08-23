@@ -180,9 +180,21 @@ function drawImgCenteredPath(path, x, y, s, ghost=false){
 
 /* ============ Entrées clavier ============ */
 const Keys=Object.create(null);
+function anyPanelOpen(){
+  return (Game?.p1?.panelActive || Game?.p2?.panelActive) ? true : false;
+}
 addEventListener('keydown', (e)=>{
-  const k=e.key.toLowerCase();
-  Keys[k]=true;
+  const k = e.key.toLowerCase();
+
+  // Si un panneau est ouvert, on ne laisse PAS ce listener gérer ces touches
+  if (anyPanelOpen() && ['arrowup','arrowdown','arrowleft','arrowright','enter','f','z','q','s','d'].includes(k)) {
+    e.preventDefault();
+    e.stopPropagation();
+    return; // pas de Keys[k]=true ici !
+  }
+
+  Keys[k] = true;
+
   if(['arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
 
   // Activation pouvoirs  — J1: Entrée, J2: F
@@ -198,7 +210,17 @@ addEventListener('keydown', (e)=>{
 
   if(k==='o'){ openOverlay(); }
 });
-addEventListener('keyup', (e)=>{ Keys[e.key.toLowerCase()]=false; });
+
+addEventListener('keyup', (e)=>{
+  const k = e.key.toLowerCase();
+
+  if (anyPanelOpen() && ['arrowup','arrowdown','arrowleft','arrowright','enter','f','z','q','s','d'].includes(k)) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  Keys[k] = false;
+});
+
 
 function triggerPower(pid){
   // Démarrage rapide si la partie n'est pas lancée
@@ -797,12 +819,10 @@ if (pl.species.id === 'stropharia'){
   return entries;
 }
 
-function powerPanelConfirm(pl){
-  const entries = getPowerPanelEntries(pl);
-  const i = (pl.panelSel|0);
-  if (entries[i] && typeof entries[i].action === 'function') entries[i].action();
+function powerPanelConfirm(pl, evt){
+  if (evt) { evt.preventDefault(); evt.stopPropagation(); }
 
-  // Fermeture immédiate + mobilité, même si < 10s
+  // 1) UI OFF + mobilité ON
   pl.powerTimer = 0;
   pl.inputLocked = false;
   pl.panelActive = false;
@@ -812,8 +832,18 @@ function powerPanelConfirm(pl){
   const el = (pl.pid===1?UI.power1:UI.power2);
   if (el) el.textContent = '—';
 
-  closePowerPanel(pl);
+  closePowerPanel(pl); // retire le listener 'keydown' du panneau
+
+  // 2) Purge immédiate des touches de navigation/validation
+  ['arrowup','arrowdown','arrowleft','arrowright','z','q','s','d','enter','f'].forEach(k => { Keys[k] = false; });
+
+  // 3) Exécuter l’action sélectionnée au prochain tick (panneau déjà fermé)
+  const entries = getPowerPanelEntries(pl);
+  const i = (pl.panelSel|0);
+  const act = entries[i] && entries[i].action;
+  if (typeof act === 'function') setTimeout(() => act(), 0);
 }
+
   
 function openPowerPanel(pl){
   closePowerPanel(pl); // sécurité
@@ -849,26 +879,41 @@ function openPowerPanel(pl){
       item.style.cssText='padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:8px;cursor:pointer;background:#0e0b13;';
       if(i===pl.panelSel){ item.style.outline='2px solid #8fd0ff'; item.style.boxShadow='0 0 0 3px #8fd0ff33'; }
       item.textContent = e.label;
-      item.onclick = () => { 
-   pl.panelSel = i;          // s'assurer qu'on confirme le bon choix
-   powerPanelConfirm(pl);    // lance l'action + ferme le panneau + rend le joueur mobile
- };
+      item.onclick = (evt) => {
+  evt.preventDefault(); evt.stopPropagation();
+  pl.panelSel = i;
+  powerPanelConfirm(pl, evt);
+};
+
       list.appendChild(item);
     });
   }
   render();
 
-  function onKey(e){
-    const k = e.key.toLowerCase();
-    const up = (pl.pid===1) ? 'arrowup' : 'z';
-    const down = (pl.pid===1) ? 'arrowdown' : 's';
-    const ok = (pl.pid===1) ? 'enter' : 'f';
-    if(k===up){ pl.panelSel = (pl.panelSel-1+getPowerPanelEntries(pl).length)%getPowerPanelEntries(pl).length; render(); e.preventDefault(); }
-    else if(k===down){ pl.panelSel = (pl.panelSel+1)%getPowerPanelEntries(pl).length; render(); e.preventDefault(); }
-    else if(k===ok){ powerPanelConfirm(pl); e.preventDefault(); }
+function onKey(e){
+  const k = e.key.toLowerCase();
+  const up = (pl.pid===1) ? 'arrowup' : 'z';
+  const down = (pl.pid===1) ? 'arrowdown' : 's';
+  const ok = (pl.pid===1) ? 'enter' : 'f';
+
+  if (k===up){
+    pl.panelSel = (pl.panelSel-1+getPowerPanelEntries(pl).length)%getPowerPanelEntries(pl).length;
+    render();
+    e.preventDefault(); e.stopPropagation();
   }
-  panel._onKey = onKey;
-  document.addEventListener('keydown', onKey);
+  else if (k===down){
+    pl.panelSel = (pl.panelSel+1)%getPowerPanelEntries(pl).length;
+    render();
+    e.preventDefault(); e.stopPropagation();
+  }
+  else if (k===ok){
+    powerPanelConfirm(pl, e);
+    // e.preventDefault() est fait dans powerPanelConfirm
+  }
+}
+panel._onKey = onKey;
+document.addEventListener('keydown', onKey);
+
 
   document.body.appendChild(panel);
   pl._panelEl = panel;
@@ -2671,6 +2716,11 @@ function updatePlayer(pl, dt){
   if (pl.glowTimer    > 0) pl.glowTimer--;
   if (pl.invulnTimer  > 0) pl.invulnTimer--;
   if (pl.madnessTimer > 0) pl.madnessTimer--;
+
+ // Garde-fou anti “panneau zombie”
+  if (!pl.panelActive && pl._panelEl) {
+  closePowerPanel(pl);
+}
 
   // Spin post-téléport
   if (pl.spinTimer > 0){
