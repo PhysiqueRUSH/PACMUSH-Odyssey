@@ -214,12 +214,34 @@ addEventListener('keydown', (e)=>{
   if(e.key === 'Enter') triggerPower(1);
   if(k==='f') triggerPower(2);
 
-  // pause / compte à rebours (début de niveau conservé)
-  if(k==='p'){
-    if(!Game.started) return;
-    if(Game.countdown>0) return;
-    if(Game.paused) startCountdown(180); else Game.paused=true;
+ // pause / compte à rebours (inclut lancement initial)
+if (k === 'p') {
+  // 1) Pas encore démarré : on lit les options, on ferme le menu, on lance la partie + CR
+  if (!Game.started) {
+    if (UI.overlay) {
+      readOptionsFromOverlay();
+      UI.overlay.remove();
+      UI.overlay = null;
+    }
+    startGame();         // crée le niveau et met Game.paused=true
+    startCountdown(180); // lance tout de suite le compte à rebours initial
+    e.preventDefault(); e.stopPropagation();
+    return;
   }
+
+  // 2) Si un compte à rebours est déjà en cours, on ignore P
+  if (Game.countdown > 0) {
+    e.preventDefault(); e.stopPropagation();
+    return;
+  }
+
+  // 3) Sinon : toggle pause ↔ compte à rebours (reprise)
+  if (Game.paused) startCountdown(180);
+  else Game.paused = true;
+
+  e.preventDefault(); e.stopPropagation();
+  return;
+}
 
   if(k==='o'){ openOverlay(); }
 });
