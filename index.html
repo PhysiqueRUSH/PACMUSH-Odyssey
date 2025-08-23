@@ -131,6 +131,19 @@ const SPRITES_BY_SPECIES = {
   anthurus:       { game: 'champignon_8.png',          ui: 'champignon_8.png' }, // Anthurus d'archer
 };
 
+/* ============ Parasite sprites ============ */
+const PARASITE_SPRITES = [
+  null,
+  'Parasite_1.png',
+  'Parasite_2.png',
+  'Parasite_3.png',
+  'Parasite_4.png',
+  'Parasite_5.png',
+  'Parasite_6.png',
+  'Parasite_7.png',
+];
+  
+
 const _IMG_CACHE = new Map();
 function loadImg(src){
   if(_IMG_CACHE.has(src)) return _IMG_CACHE.get(src);
@@ -143,11 +156,11 @@ function preloadCoreImages(){
   const list = [
     'sol_foret.png',
     TREE_PNG.chene, TREE_PNG.pin,
-    ...Object.values(SPRITES_BY_SPECIES).flatMap(v => [v.game, v.ui])
+    ...Object.values(SPRITES_BY_SPECIES).flatMap(v => [v.game, v.ui]),
+    ...PARASITE_SPRITES.slice(1)
   ];
   list.forEach(src => loadImg(src));
 }
-  
 
 // --- ARBRES PNG (à la racine du projet, sinon ajuste les chemins) ---
 const TREE_PNG = {
@@ -307,6 +320,60 @@ if (pl.panelActive) return;
 /* ============ Utils ============ */
 const now=()=>performance.now();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+// --- Orientation parasites (quart de tour) ---
+function angleFromDir4(d){
+  if(!d) return null;
+  const [dx,dy] = d;
+  if (dy < 0 && dx === 0) return 0;             // haut (sprite natif)
+  if (dx > 0 && dy === 0) return Math.PI/2;     // droite
+  if (dy > 0 && dx === 0) return Math.PI;       // bas
+  if (dx < 0 && dy === 0) return -Math.PI/2;    // gauche
+  return null;
+}
+function normAngle(a){
+  while(a <= -Math.PI) a += Math.PI*2;
+  while(a >   Math.PI) a -= Math.PI*2;
+  return a;
+}
+function lerp(a,b,t){ return a + (b-a)*t; }
+function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+// Planifie un quart de tour (±90°). Si l'écart est de 180°, on fera 2 quarts successifs.
+function scheduleQuarterTurn(p, targetAngle){
+  const cur = p.faceAngle || 0;
+  const delta = normAngle(targetAngle - cur);
+  const step = Math.sign(delta) * Math.min(Math.PI/2, Math.abs(delta));
+  p.turnFromAngle = cur;
+  p.turnToAngle   = cur + step;
+  p.turnTimer     = p.turnDuration || 6; // ~6 frames
+  p.pendingAngle  = (Math.abs(delta) > Math.PI/2 + 0.001) ? targetAngle : null;
+}
+
+// À appeler 1x par frame (animer + déclencher si besoin)
+function updateParasiteOrientation(p, dt){
+  // Animation en cours ?
+  if ((p.turnTimer||0) > 0){
+    p.turnTimer -= dt;
+    const t  = Math.max(0, Math.min(1, 1 - (p.turnTimer / (p.turnDuration||6))));
+    const tt = easeOutCubic(t);
+    p.faceAngle = lerp(p.turnFromAngle||0, p.turnToAngle||0, tt);
+    if (p.turnTimer <= 0){
+      p.faceAngle = p.turnToAngle||0;
+      if (p.pendingAngle != null){
+        const diff = normAngle(p.pendingAngle - p.faceAngle);
+        if (Math.abs(diff) > 0.001) scheduleQuarterTurn(p, p.pendingAngle);
+        else p.pendingAngle = null;
+      }
+    }
+    return;
+  }
+  // Sinon : regarde si la direction courante impose un nouveau quart de tour
+  const target = angleFromDir4(p.dir);
+  if (target == null) return;             // pas de direction (immobile)
+  const diff = normAngle(target - (p.faceAngle||0));
+  if (Math.abs(diff) > 0.01) scheduleQuarterTurn(p, target);
+}
+
 const distance=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
 const makeLayerCanvas=(w,h)=>{ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
 // === HUD Leader (visible UNIQUEMENT en mode 2 joueurs) ===
@@ -409,31 +476,57 @@ function drawAnthurus(ctx, cx, cy, size, icon){
 }
 
 /* ============ Parasites (ennemis) ============ */
-function drawParasite(ctx,cx,cy,size,kind,isServant,isBlind,isConfused){
-  kind=kind||0; ctx.save(); ctx.translate(cx,cy); const r=size*0.35;
-  if(isServant){
-    ctx.shadowColor='rgba(64,224,208,0.8)'; ctx.shadowBlur=10;
-    const grad=ctx.createRadialGradient(0,0,r*0.3,0,0,r*1.1);
-    grad.addColorStop(0,'#DFFFF8'); grad.addColorStop(0.5,'#40E0D0'); grad.addColorStop(1,'#1A8C86');
-    ctx.fillStyle=grad; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
-    ctx.lineWidth=2; ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.stroke();
-    ctx.shadowBlur=0; ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.fillRect(-r*0.8,-r*0.1,r*1.6,r*0.2);
-  } else if(isBlind){
-    ctx.fillStyle='#8b8b8b'; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#000'; ctx.fillRect(-r*1.0,-r*0.18, r*2.0, r*0.36);
-    ctx.fillStyle='#222'; ctx.fillRect(-r*0.8,-r*0.1, r*1.6, r*0.2);
-  } else {
-    const col=['#9f3b3b','#3b6f9f','#9f8a3b','#7f3b9f'][kind%4];
-    ctx.fillStyle=col; ctx.beginPath(); ctx.ellipse(0,0,r*1.2,r*0.9,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#111'; ctx.fillRect(-r*0.8,-r*0.1,r*1.6,r*0.2);
+function drawParasiteSprite(p){
+  const idx = Math.max(1, Math.min(7, p.kind || 1));
+  const path = PARASITE_SPRITES[idx];
+  const img  = loadImg(path);
+  if (!img.complete) return;
+
+  const cx = p.x * TILE, cy = p.y * TILE;
+  const size = TILE * 0.95;
+
+  // Glow serviteur (avant le sprite)
+  if (p.servant){
+    CTX.save();
+    CTX.globalAlpha = 0.8;
+    const r = size * 0.42;
+    const g = CTX.createRadialGradient(cx, cy, r*0.2, cx, cy, r*1.25);
+    g.addColorStop(0, 'rgba(223,255,248,0.95)');
+    g.addColorStop(0.5, 'rgba(64,224,208,0.70)');
+    g.addColorStop(1, 'rgba(26,140,134,0.0)');
+    CTX.fillStyle = g;
+    CTX.beginPath(); CTX.arc(cx, cy, r*1.2, 0, Math.PI*2); CTX.fill();
+    CTX.restore();
   }
-  if(isConfused){
-    ctx.fillStyle='#fff'; ctx.globalAlpha=0.9; ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText('✳',0,-r*1.6);
-    ctx.globalAlpha=1;
+
+  // Sprite + rotation (0 rad = tête vers le haut)
+  CTX.save();
+  CTX.translate(cx, cy);
+  CTX.rotate(p.faceAngle || 0);
+  CTX.drawImage(img, -size/2, -size/2, size, size);
+  CTX.restore();
+
+  // Indicateurs (optionnels)
+  if (p.confusedTimer > 0){
+    CTX.save();
+    CTX.globalAlpha = 0.9;
+    CTX.font = '12px system-ui';
+    CTX.textAlign = 'center';
+    CTX.textBaseline = 'middle';
+    CTX.fillStyle = '#fff';
+    CTX.fillText('✳', cx, cy - TILE*0.6);
+    CTX.restore();
   }
-  ctx.restore();
+  if (p.blind > 0){
+    CTX.save();
+    CTX.globalAlpha = 0.55;
+    const w = size * 0.6, h = size * 0.16;
+    CTX.fillStyle = '#000';
+    CTX.fillRect(cx - w/2, cy - h/2, w, h);
+    CTX.restore();
+  }
 }
+
 
 /* ============ Espèces & pouvoirs ============ */
 const Species = [
@@ -1354,22 +1447,59 @@ Game.grid = genLevel(seed);
     const pos=findOpenTile();
 const base = enemyBaseSpeedAt(i);
 const speed = base * SelectedDifficulty.factor;
-    Game.parasites.push({
-      x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind:k%4,
-      scared:0, blind:0,
-      state:'wander',lastSeen:null,path:[],
-      chaos:false, chaosMode:null, chaosTick:0, chaosTarget:null,
-      seedOnce:false, seedCd:0, chaosAte:false,
-      servant:false, frozen: 0, servantTime:0, servantOwner:0,
-      // knockback
-      kbActive:false, kbTx:0, kbTy:0, kbSpeed:0, kbDir:[0,0],
-      // confusion (après impact mur)
-      fleeGirolle:0,
-      morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null,
-      confusedTimer:0,
-      tpGrace:0,
-      avoidVortex: 0  // frames à éviter de repasser sur un vortex
-    });
+   Game.parasites.push({
+  x: pos.x + 0.5,
+  y: pos.y + 0.5,
+  dir: [1, 0],
+  speed: speed,
+  baseSpeed: speed,
+
+  // ← sprite parasite aléatoire (1..7)
+  kind: ((Math.random() * 7) | 0) + 1,
+
+  // --- ORIENTATION (quart de tour) ---
+  faceAngle: angleFromDir4([1, 0]) || 0,
+  turnFromAngle: 0,
+  turnToAngle: 0,
+  turnTimer: 0,
+  turnDuration: 6,
+  pendingAngle: null,
+
+  scared: 0,
+  blind: 0,
+  state: 'wander',
+  lastSeen: null,
+  path: [],
+  chaos: false,
+  chaosMode: null,
+  chaosTick: 0,
+  chaosTarget: null,
+  seedOnce: false,
+  seedCd: 0,
+  chaosAte: false,
+  servant: false,
+  frozen: 0,
+  servantTime: 0,
+  servantOwner: 0,
+
+  // knockback
+  kbActive: false,
+  kbTx: 0,
+  kbTy: 0,
+  kbSpeed: 0,
+  kbDir: [0, 0],
+
+  // confusion (après impact mur)
+  fleeGirolle: 0,
+  morilleChaos: 0,
+  morilleOwner: 0,
+  morilleNextSwitch: 0,
+  morilleMode: null,
+  confusedTimer: 0,
+
+  tpGrace: 0,
+  avoidVortex: 0 // frames à éviter de repasser sur un vortex
+});
   }
 
   // joueurs — positions de départ vraiment aléatoires
@@ -1550,14 +1680,58 @@ function teleportParasiteFarFromPlayer(parasite, plRef){
 function spawnEnemy(){ const pos=findOpenTile(); const base = enemyBaseSpeedAt(LEVEL_INDEX);
 const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
   Game.parasites.push({
-    x:pos.x+0.5,y:pos.y+0.5,dir:[1,0],speed:speed,baseSpeed:speed,kind,
-    scared:0,blind:0,state:'wander',lastSeen:null,path:[],
-    chaos:false,chaosMode:null,chaosTarget:null,seedOnce:false,seedCd:0,chaosAte:false,
-    servant:false,servantTime:0,servantOwner:0,
-    kbActive:false,kbTx:0,kbTy:0,kbSpeed:0,kbDir:[0,0],
-    fleeGirolle:0, frozen: 0,
-    morilleChaos:0, morilleOwner:0, morilleNextSwitch:0, morilleMode:null, tpGrace:0,
-    confusedTimer:0, avoidVortex: 0  // frames à éviter de repasser sur un vortex
+    x: pos.x + 0.5,
+    y: pos.y + 0.5,
+    dir: [1, 0],
+    speed: speed,
+    baseSpeed: speed,
+
+    // --- Sprite parasite aléatoire : 1..7 ---
+    kind: ((Math.random() * 7) | 0) + 1,
+
+    // --- ORIENTATION (quart de tour sur changement de direction) ---
+    faceAngle: (typeof angleFromDir4 === 'function' ? angleFromDir4([1,0]) : 0),
+    turnFromAngle: 0,
+    turnToAngle: 0,
+    turnTimer: 0,
+    turnDuration: 6,   // ~6 frames pour l'anim du quart de tour
+    pendingAngle: null,
+
+    scared: 0,
+    blind: 0,
+    state: 'wander',
+    lastSeen: null,
+    path: [],
+    chaos: false,
+    chaosMode: null,
+    chaosTick: 0,
+    chaosTarget: null,
+    seedOnce: false,
+    seedCd: 0,
+    chaosAte: false,
+
+    servant: false,
+    frozen: 0,
+    servantTime: 0,
+    servantOwner: 0,
+
+    // knockback
+    kbActive: false,
+    kbTx: 0,
+    kbTy: 0,
+    kbSpeed: 0,
+    kbDir: [0, 0],
+
+    // confusion (après impact mur)
+    fleeGirolle: 0,
+    morilleChaos: 0,
+    morilleOwner: 0,
+    morilleNextSwitch: 0,
+    morilleMode: null,
+    confusedTimer: 0,
+
+    tpGrace: 0,
+    avoidVortex: 0 // frames à éviter de repasser sur un vortex
   });
 }
 
@@ -2928,26 +3102,105 @@ function draw(){
     if(pa.type==='cloud'){ CTX.globalAlpha=0.2; CTX.beginPath(); CTX.arc(pa.x,pa.y,pa.r,0,6.28); CTX.fillStyle='#ffffff'; CTX.fill(); CTX.globalAlpha=1; }
   });
 
-  Game.parasites.forEach(p=>{
-    drawParasite(CTX,p.x*TILE,p.y*TILE,TILE*0.9,p.kind,p.servant,(p.blind>0),(p.confusedTimer>0));
-    if(p.scared>0){ CTX.globalAlpha=0.4; CTX.fillStyle='#fff'; CTX.fillRect(p.x*TILE-10,p.y*TILE-10,20,20); CTX.globalAlpha=1; }
-    if(p.kbActive){
-      // petite traînée
-      CTX.save(); CTX.globalAlpha=0.15;
-      CTX.fillStyle='#ffe6aa'; CTX.beginPath();
-      CTX.arc(p.x*TILE, p.y*TILE, 8, 0, Math.PI*2); CTX.fill();
-      CTX.restore();
-    }
-    if (p.frozen > 0) {
-  CTX.save();
-  CTX.globalAlpha = 0.35;
-  CTX.fillStyle = '#9ad6ff';
-  CTX.beginPath();
-  CTX.arc(p.x*TILE, p.y*TILE, 12, 0, Math.PI*2);
-  CTX.fill();
-  CTX.restore();
-}
-  });
+ // --- NOUVEAU rendu parasites (sprites PNG 1..7 + rotation) ---
+Game.parasites.forEach(p=>{
+  const px = p.x * TILE;
+  const py = p.y * TILE;
+
+  // helper local : angle en radian depuis dir discrète (sprite "tête vers le haut")
+  const angleFromDir4Local = (d) => {
+    if (!d) return 0;
+    if (d[1] === -1) return 0;                 // haut
+    if (d[0] ===  1) return Math.PI / 2;       // droite
+    if (d[1] ===  1) return Math.PI;           // bas
+    if (d[0] === -1) return -Math.PI / 2;      // gauche
+    return 0;
+  };
+
+  // --- couches sous le sprite ---
+  // Frozen : halo glacé
+  if (p.frozen > 0) {
+    CTX.save();
+    CTX.globalAlpha = 0.35;
+    CTX.fillStyle = '#9ad6ff';
+    CTX.beginPath();
+    CTX.arc(px, py, 12, 0, Math.PI * 2);
+    CTX.fill();
+    CTX.restore();
+  }
+
+  // Serviteur : glow turquoise
+  if (p.servant) {
+    CTX.save();
+    const g = CTX.createRadialGradient(px, py, 6, px, py, 18);
+    g.addColorStop(0, 'rgba(223,255,248,0.7)');
+    g.addColorStop(1, 'rgba(64,224,208,0)');
+    CTX.fillStyle = g;
+    CTX.beginPath();
+    CTX.arc(px, py, 18, 0, Math.PI * 2);
+    CTX.fill();
+    CTX.restore();
+  }
+
+  // --- sprite PNG + rotation ---
+  const kind = Math.max(1, Math.min(7, (p.kind|0) || 1)); // borne 1..7
+  const img  = loadImg(`Parasite_${kind}.png`);           // tes fichiers
+  const ang  = (typeof p.faceAngle === 'number')
+    ? p.faceAngle
+    : angleFromDir4Local(p.dir || [0, -1]);               // fallback si pas d’anim
+
+  const size = TILE * 0.9;
+
+  if (img.complete) {
+    CTX.save();
+    CTX.translate(px, py);
+    CTX.rotate(ang);
+    CTX.drawImage(img, -size/2, -size/2, size, size);
+    CTX.restore();
+  }
+
+  // Aveugle : bandeau noir
+  if (p.blind > 0) {
+    CTX.save();
+    CTX.globalAlpha = 0.6;
+    CTX.fillStyle = '#000';
+    CTX.fillRect(px - size*0.5, py - size*0.08, size, size*0.16);
+    CTX.restore();
+  }
+
+  // Confus : icône ✳ au-dessus
+  if (p.confusedTimer > 0) {
+    CTX.save();
+    CTX.globalAlpha = 0.9;
+    CTX.font = '12px system-ui';
+    CTX.textAlign = 'center';
+    CTX.textBaseline = 'middle';
+    CTX.fillStyle = '#fff';
+    CTX.fillText('✳', px, py - (size*0.8));
+    CTX.restore();
+  }
+
+  // Effet "scared" : flash blanc
+  if (p.scared > 0) {
+    CTX.save();
+    CTX.globalAlpha = 0.4;
+    CTX.fillStyle = '#fff';
+    CTX.fillRect(px - 10, py - 10, 20, 20);
+    CTX.restore();
+  }
+
+  // Traînée knockback
+  if (p.kbActive) {
+    CTX.save();
+    CTX.globalAlpha = 0.15;
+    CTX.fillStyle = '#ffe6aa';
+    CTX.beginPath();
+    CTX.arc(px, py, 8, 0, Math.PI * 2);
+    CTX.fill();
+    CTX.restore();
+  }
+});
+
 
   if(Game.p1) drawPlayerEntity(Game.p1);
   if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
