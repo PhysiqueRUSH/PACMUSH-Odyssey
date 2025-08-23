@@ -639,20 +639,20 @@ const Species = [
       }
     },
   
-  {
-    id: 'phalloides',
-    name: 'Amanite phalloïde',
-    power: 'Phase mycélienne',
-    desc: "Peut traverser une rangée d'arbres (mur intérieur du labyrinthe).",
-    color: '#7a8b4b',
-    draw: drawPhalloides,
-    use: (me) => {
-      if (me.phaseCooldown>0) return;
-      me.phase = true;
-      me.phaseInsideWall = false;
-      me.powerTimer = 99999; // on coupera après sortie du 1er mur
-    }
-  },
+{
+  id: 'phalloides',
+  name: 'Amanite phalloïde',
+  power: 'Phase mycélienne',
+  desc: "Peut traverser une rangée d'arbres (mur intérieur du labyrinthe).",
+  color: '#7a8b4b',
+  draw: drawPhalloides,
+  use: (me) => {
+    if (me.phaseCooldown > 0) return;
+    me.phase = true;
+    me.phaseInsideWall = false;
+    me.powerTimer = 99999; // on coupera après sortie du 1er mur
+  }
+},
   
   {
   id: 'stropharia',
