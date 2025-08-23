@@ -534,7 +534,7 @@ const Species = [
   id: 'cornucopioides',
   name: "Trompette de la mort",
   power: "Voile d'ombre",
-  desc: "Devient invisible. Plus elle a dévoré de spores, plus ce pouvoir dure longtemps.",
+  desc: "Devient invisible (la durée augmente en collectant les spores) mais se déplace plus lentement.",
   color: '#3d3630',
   draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
   use: (me) => {
@@ -562,7 +562,7 @@ const Species = [
     id: 'muscaria',
     name: 'Amanite tue-mouches',
     power: 'Piège mycotique',
-    desc: "Pose un piège qui téléporte les parasites.",
+    desc: "Pose des pièges qui téléportent les parasites ailleurs sur la carte.",
     color: '#c81d1d',
     draw: drawAmanita,
     use: (me) => {
@@ -576,8 +576,8 @@ const Species = [
   {
     id: 'cibarius',
     name: 'Girolle',
-    power: 'Serviteur (15s)',
-    desc: 'Convertit 1 parasite en allié collecteur.',
+    power: 'Serviteur parasite',
+    desc: 'Peut capturer un parasite et le transforme temporairement en allié collecteur.',
     color: '#e6a100',
     draw: drawChanterelle,
     use: (me) => {
@@ -595,7 +595,7 @@ const Species = [
     id: 'edulis',
     name: 'Cèpe',
     power: 'Robustesse',
-    desc: 'Ignore un coup et repousse l’ennemi en chaîne.',
+    desc: 'Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.',
     color: '#7a4f2a',
     draw: drawCep,
     use: (me) => { me.powerTimer=360; me.shield=true; }
@@ -604,8 +604,8 @@ const Species = [
   {
     id: 'morchella',
     name: 'Morille',
-    power: 'Essaim de spores',
-    desc: 'Parasites et adversaires désorientés. Le joueur adverse devient fou pendant 5 secondes',
+    power: 'Spores du chaos',
+    desc: 'Libère des spores qui désorientent les parasites et troublent l’adversaire.',
     color: '#6a4f2f',
     draw: drawMorel,
     use: (me) => {
@@ -643,7 +643,7 @@ const Species = [
     id: 'phalloides',
     name: 'Amanite phalloïde',
     power: 'Phase mycélienne',
-    desc: 'Traverse les murs fins brièvement.',
+    desc: 'Peut traverser une rangée d'arbres (mur intérieur du labyrinthe).',
     color: '#7a8b4b',
     draw: drawPhalloides,
     use: (me) => {
@@ -657,8 +657,8 @@ const Species = [
   {
   id: 'stropharia',
   name: 'Strophaire Vert-de-gris',
-  power: 'Aide coop (panneau 10s)',
-  desc: "Devient immobile et invisible pour les parasites pendant 10s, puis peut poser de l’aide : mur, retirer un mur, bonus vitesse allié, bonus freeze, vortex 10s, désactiver pièges proches.",
+  power: 'Assitance symbiotique',
+  desc: "Coopère avec l'autre champignon et l'assiste pour ne pas qu'il se fasse dévorer par les parasites",
   color: '#6bb08f',
   draw: drawStropharia,
   use: ()=>{} // géré par triggerPower()
@@ -667,8 +667,8 @@ const Species = [
 {
   id: 'anthurus',
   name: "Anthurus d'archer",
-  power: 'Sabotage (panneau 10s) – charge 10 spores',
-  desc: "Ne craint pas les parasites. Peut attraper l’adversaire au contact. Pouvoir utilisable après 10 spores : mur, retirer un mur, envoyer un parasite, piège ovale vert.",
+  power: 'Extinction de la concurrence',
+  desc: "Allié des parasites, il met en place des pièges et des sabotages pour nuire au champignon adverse.",
   color: '#b04a6b',
   draw: drawAnthurus,
   use: ()=>{} // géré par triggerPower()
@@ -1095,7 +1095,7 @@ function startGame(){
 
   reseedSession(1);
 
-  Game.showStartHint = 240;
+  Game.showStartHint = 0;
   resetMatch(true);
   updateLeaderHUD();
   UI.diff.textContent=SelectedDifficulty.name;
@@ -1245,6 +1245,7 @@ function carveRandomPlacettes(g, rng, countMin=2, countMax=5, halfMin=1, halfMax
 
 /* ============ État jeu ============ */
 const Game={
+  preStart: false,
   started:false, mode:'solo',
   grid:null, remaining:0,
   score1:0, score2:0, lives1:3, lives2:3,
@@ -1538,7 +1539,10 @@ if (Game.mode === 'duo') UI.power2.textContent = '—';
   UI.score1.textContent = Game.score1; UI.lives1.textContent = Game.lives1; UI.power1.textContent = '—';
   UI.score2.textContent = Game.score2; UI.lives2.textContent = Game.lives2; UI.power2.textContent = '—';
   UI.diff.textContent = SelectedDifficulty.name;
-  Game.paused = true; Game.countdown = 0;
+ Game.paused = true; 
+Game.countdown = 0;
+Game.preStart = true;      // ← signal “avant départ” actif
+
   updateLeaderHUD();
 }
 
@@ -2249,7 +2253,12 @@ function loop(){
   draw();
   requestAnimationFrame(loop);
 }
-function startCountdown(frames){ Game.countdown=Math.max(1,frames|0); Game.paused=false; }
+function startCountdown(frames){
+  Game.countdown = Math.max(1, frames|0);
+  Game.paused = false;
+  Game.preStart = false;   // ← on quitte l’état “avant départ”
+}
+
 function updateCountdown(){
   Game.countdown--;
   if(Game.countdown<=0){
@@ -3212,29 +3221,44 @@ Game.parasites.forEach(p=>{
   if(Game.p1) drawPlayerEntity(Game.p1);
   if(Game.mode==='duo' && Game.p2) drawPlayerEntity(Game.p2);
 
-  // Indication de départ
-  if(Game.showStartHint>0){
-    Game.showStartHint--;
-    CTX.save();
-    CTX.globalAlpha = 0.85*(Math.sin(performance.now()/250)*0.5+0.5);
-    CTX.fillStyle='#00000088'; CTX.fillRect(W*0.25,H*0.42,W*0.5,80);
-    CTX.globalAlpha=1;
-    CTX.fillStyle='#fff'; CTX.font='bold 26px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
-    CTX.fillText('Appuyez sur P pour lancer la partie', W/2, H*0.5);
-    CTX.restore();
-  }
+ // État pré-départ / pause / compte à rebours
+if (Game.preStart) {
+  // balises infinies sur les positions des joueurs
+  drawPreStartBeacons();
 
-  // État pause / compte à rebours
-  if(Game.paused && Game.countdown===0){
-    CTX.save(); CTX.globalAlpha=0.35; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H);
-    CTX.globalAlpha=1; CTX.fillStyle='#fff'; CTX.font='bold 42px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
-    CTX.fillText('PAUSE — P pour lancer', W/2, H*0.5); CTX.restore();
-  } else if(Game.countdown>0){
-    const sec=Math.ceil(Game.countdown/60);
-    CTX.save(); CTX.globalAlpha=0.3; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H); CTX.globalAlpha=1;
-    CTX.fillStyle='#fff'; CTX.font='bold 120px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
-    CTX.fillText(sec.toString(), W/2, H*0.5); CTX.restore();
-  }
+  // petit bandeau discret en haut-gauche (ne masque pas le labyrinthe)
+  CTX.save();
+  const pad = 10;
+  const text = 'P pour lancer — libre d’explorer visuellement';
+  CTX.font = 'bold 16px system-ui';
+  const w = CTX.measureText(text).width + pad*2;
+  const h = 28;
+
+  CTX.fillStyle = 'rgba(0,0,0,0.45)';
+  CTX.fillRect(10, 10, w, h);
+  CTX.fillStyle = '#fff';
+  CTX.textAlign = 'left';
+  CTX.textBaseline = 'middle';
+  CTX.fillText(text, 10 + pad, 10 + h/2);
+  CTX.restore();
+}
+else if (Game.paused && Game.countdown === 0){
+  // vraie pause en cours de partie : overlay central classique
+  CTX.save(); 
+  CTX.globalAlpha=0.35; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H);
+  CTX.globalAlpha=1; CTX.fillStyle='#fff'; CTX.font='bold 42px system-ui'; 
+  CTX.textAlign='center'; CTX.textBaseline='middle';
+  CTX.fillText('PAUSE — P pour reprendre', W/2, H*0.5); 
+  CTX.restore();
+}
+else if (Game.countdown > 0){
+  const sec=Math.ceil(Game.countdown/60);
+  CTX.save(); CTX.globalAlpha=0.3; CTX.fillStyle='#000'; CTX.fillRect(0,0,W,H); CTX.globalAlpha=1;
+  CTX.fillStyle='#fff'; CTX.font='bold 120px system-ui'; CTX.textAlign='center'; CTX.textBaseline='middle';
+  CTX.fillText(sec.toString(), W/2, H*0.5); 
+  CTX.restore();
+}
+
 }
 
 function drawTrapsAndBonuses(){
@@ -3330,6 +3354,44 @@ function drawPlayerEntity(pl){
     CTX.fill();
     CTX.restore();
   }
+
+  function drawPreStartBeacons(){
+  const drawOne = (pl, label) => {
+    if(!pl) return;
+    const x = pl.x * TILE, y = pl.y * TILE;
+    const t = performance.now() / 1000;
+
+    // halo pulsant (infini)
+    const r = 22 + 6*Math.sin(t*2.1);
+    const g = CTX.createRadialGradient(x, y, r*0.25, x, y, r*1.1);
+    g.addColorStop(0.00, 'rgba(255,240,180,0.70)');
+    g.addColorStop(0.55, 'rgba(255,210,100,0.28)');
+    g.addColorStop(1.00, 'rgba(255,210,100,0.00)');
+
+    CTX.save();
+    CTX.globalCompositeOperation = 'screen';
+    CTX.fillStyle = g;
+    CTX.beginPath(); CTX.arc(x, y, r*1.1, 0, Math.PI*2); CTX.fill();
+
+    // fin liseré
+    CTX.globalCompositeOperation = 'source-over';
+    CTX.lineWidth = 2;
+    CTX.strokeStyle = 'rgba(255,230,150,0.9)';
+    CTX.beginPath(); CTX.arc(x, y, r + 6, 0, Math.PI*2); CTX.stroke();
+
+    // petit label
+    CTX.font = 'bold 12px system-ui';
+    CTX.textAlign = 'center';
+    CTX.textBaseline = 'bottom';
+    CTX.fillStyle = '#fff';
+    CTX.fillText(label, x, y - (r + 10));
+    CTX.restore();
+  };
+
+  drawOne(Game.p1, 'J1');
+  if (Game.mode === 'duo') drawOne(Game.p2, 'J2');
+}
+
 
   // --- Fonction de rendu champignon (sprite centré) ---
   const drawMushroomCentered = (cx, cy) => {
