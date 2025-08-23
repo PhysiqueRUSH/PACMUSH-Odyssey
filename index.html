@@ -533,7 +533,7 @@ const Species = [
 {
   id: 'cornucopioides',
   name: 'Trompette de la mort',
-  power: 'Voile d'ombre',
+  power: `Voile d'ombre`,
   desc: 'Devient invisible (la durée augmente en collectant les spores) mais se déplace plus lentement.',
   color: '#3d3630',
   draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
@@ -553,92 +553,88 @@ const Species = [
     me.invisible  = true;    // indétectable pour l’IA
     me.speedBoost = 0.5;     // -50% de vitesse
     me.trumpetTrapImmune = false; // plus d’immunité aux pièges
-
-    // Pas d'aveuglement des parasites
   }
 },
 
-  {
-    id: 'muscaria',
-    name: 'Amanite tue-mouches',
-    power: 'Piège mycotique',
-    desc: 'Pose des pièges qui téléportent les parasites ailleurs sur la carte.',
-    color: '#c81d1d',
-    draw: drawAmanita,
-    use: (me) => {
-      const tx = Math.floor(me.x), ty = Math.floor(me.y);
-      if (me.pid===1) Game.muscariaTrap1 = {x:tx,y:ty,active:true};
-      else            Game.muscariaTrap2 = {x:tx,y:ty,active:true};
-      me.powerTimer = 120;
-    }
-  },
-  
-  {
-    id: 'cibarius',
-    name: 'Girolle',
-    power: 'Serviteur parasite',
-    desc: 'Peut capturer un parasite et le transforme temporairement en allié collecteur.',
-    color: '#e6a100',
-    draw: drawChanterelle,
-    use: (me) => {
-      me.powerTimer = 15*60;   // ~15s
-      me.hunterWindow = 600;   // fenêtre de capture (10s)
-      UI[me.pid===1 ? 'power1' : 'power2'].textContent = 'Serviteur ?';
+{
+  id: 'muscaria',
+  name: 'Amanite tue-mouches',
+  power: 'Piège mycotique',
+  desc: 'Pose des pièges qui téléportent les parasites ailleurs sur la carte.',
+  color: '#c81d1d',
+  draw: drawAmanita,
+  use: (me) => {
+    const tx = Math.floor(me.x), ty = Math.floor(me.y);
+    if (me.pid===1) Game.muscariaTrap1 = {x:tx,y:ty,active:true};
+    else            Game.muscariaTrap2 = {x:tx,y:ty,active:true};
+    me.powerTimer = 120;
+  }
+},
 
-      Game.girollePanic.active = true;
-      Game.girollePanic.ownerPid = me.pid;
-      Game.parasites.forEach(p => { p.fleeGirolle = me.hunterWindow; });
-    }
-  },
-  
-  {
-    id: 'edulis',
-    name: 'Cèpe',
-    power: 'Robustesse',
-    desc: 'Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.',
-    color: '#7a4f2a',
-    draw: drawCep,
-    use: (me) => { me.powerTimer=360; me.shield=true; }
-  },
-  
-  {
-    id: 'morchella',
-    name: 'Morille',
-    power: 'Spores du chaos',
-    desc: 'Libère des spores qui désorientent les parasites et troublent l’adversaire.',
-    color: '#6a4f2f',
-    draw: drawMorel,
-    use: (me) => {
-      me.powerTimer = 600; // 10s d'aura
-      const radTiles = Math.max(1, Math.floor(0.20 * Math.max(COLS, ROWS)));
-      const cx = me.x, cy = me.y;
+{
+  id: 'cibarius',
+  name: 'Girolle',
+  power: 'Serviteur parasite',
+  desc: 'Peut capturer un parasite et le transforme temporairement en allié collecteur.',
+  color: '#e6a100',
+  draw: drawChanterelle,
+  use: (me) => {
+    me.powerTimer = 15*60;   // ~15s
+    me.hunterWindow = 600;   // fenêtre de capture (10s)
+    UI[me.pid===1 ? 'power1' : 'power2'].textContent = 'Serviteur ?';
 
-      Game.parasites.forEach(p => {
-        if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
-          p.morilleChaos = 600;
-          p.morilleOwner = me.pid;
-          p.morilleNextSwitch = 0;
-          p.morilleMode = null;
-        }
-      });
-      // Option visuelle + léger fear local
-      spawnSporeCloud(me.x, me.y, radTiles);
-    // === NOUVEAU : en 2J, l’adversaire dans la zone devient incontrôlable 5s (inversion des contrôles)
+    Game.girollePanic.active = true;
+    Game.girollePanic.ownerPid = me.pid;
+    Game.parasites.forEach(p => { p.fleeGirolle = me.hunterWindow; });
+  }
+},
+
+{
+  id: 'edulis',
+  name: 'Cèpe',
+  power: 'Robustesse',
+  desc: 'Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.',
+  color: '#7a4f2a',
+  draw: drawCep,
+  use: (me) => { me.powerTimer=360; me.shield=true; }
+},
+
+{
+  id: 'morchella',
+  name: 'Morille',
+  power: 'Spores du chaos',
+  desc: 'Libère des spores qui désorientent les parasites et troublent l’adversaire.',
+  color: '#6a4f2f',
+  draw: drawMorel,
+  use: (me) => {
+    me.powerTimer = 600; // 10s d'aura
+    const radTiles = Math.max(1, Math.floor(0.20 * Math.max(COLS, ROWS)));
+    const cx = me.x, cy = me.y;
+
+    Game.parasites.forEach(p => {
+      if (Math.hypot(p.x-cx, p.y-cy) <= radTiles) {
+        p.morilleChaos = 600;
+        p.morilleOwner = me.pid;
+        p.morilleNextSwitch = 0;
+        p.morilleMode = null;
+      }
+    });
+    spawnSporeCloud(me.x, me.y, radTiles);
+
     if (Game.mode === 'duo') {
       const foe = (me.pid === 1) ? Game.p2 : Game.p1;
       if (foe) {
         const dist = Math.hypot(foe.x - cx, foe.y - cy);
         if (dist <= radTiles) {
           foe.madnessTimer = 300; // 5s @60fps
-          sfxPower();             // petit feedback audio
-          // Option: petit flash de glow pour signaler l’état
+          sfxPower();
           foe.glowTimer = Math.max(foe.glowTimer||0, 60);
         }
       }
     }
-      }
-    },
-  
+  }
+},
+
 {
   id: 'phalloides',
   name: 'Amanite phalloïde',
@@ -653,20 +649,20 @@ const Species = [
     me.powerTimer = 99999; // on coupera après sortie du 1er mur
   }
 },
-  
-  {
+
+{
   id: 'stropharia',
   name: 'Strophaire Vert-de-gris',
-  power: 'Assitance symbiotique',
-  desc: 'Coopère avec l'autre champignon et l'assiste pour ne pas qu'il se fasse dévorer par les parasites',
+  power: 'Assistance symbiotique',
+  desc: `Coopère avec l'autre champignon et l'assiste pour éviter les parasites.`,
   color: '#6bb08f',
   draw: drawStropharia,
   use: ()=>{} // géré par triggerPower()
 },
-  
+
 {
   id: 'anthurus',
-  name: 'Anthurus d'archer',
+  name: `Anthurus d'archer`,
   power: 'Extinction de la concurrence',
   desc: 'Allié des parasites, il met en place des pièges et des sabotages pour nuire au champignon adverse.',
   color: '#b04a6b',
