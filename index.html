@@ -35,7 +35,7 @@
       <div class="pill">J1 — Score: <span id="score1">0</span> · Vies: <span id="lives1">3</span> · Pouvoir: <span id="power1">—</span></div>
       <div class="pill" id="p2hud" style="display:none">J2 — Score: <span id="score2">0</span> · Vies: <span id="lives2">3</span> · Pouvoir: <span id="power2">—</span></div>
       <div class="pill">Difficulté : <span id="diff">Guerre des Spores</span></div>
-      <div id="legend" class="pill">J1: Flèches + Entrée · J2: ZQSD + F · P: pause/CR · O: menu</div>
+      <div id="legend" class="pill">J1: Flèches + Entrée + Maj. Droite (Super) · J2: ZQSD + F + Espace (Super) · P: pause/CR · O: menu</div>
     </div>
     <canvas id="game" width="1100" height="880" aria-label="PACMUSH ODYSSEY"></canvas>
   </div>
@@ -313,23 +313,125 @@ function triggerSuperPower(pid){
 
   const pl = (pid===1 ? Game.p1 : Game.p2);
   if(!pl) return;
-  if (!pl.superPowerHeld) return;
+  if (!pl.superPowerHeld && !tryCollectNearbyPowerBonus(pl)) return;
+
+  if (pl.species.id === 'stropharia' || pl.species.id === 'anthurus'){
+    pl.panelActive = true;
+    pl.panelMode = 'super';
+    pl.powerTimer = 600;
+    pl.dir = [0,0]; pl.nextDir = [0,0];
+    pl.inputLocked = true;
+    const hudEl = (pid===1?UI.power1:UI.power2);
+    if (hudEl) hudEl.textContent = 'Super panel (10s)';
+    openPowerPanel(pl);
+    sfxPower();
+    return;
+  }
 
   pl.superPowerHeld = false;
-  const hudEl = (pid===1?UI.power1:UI.power2);
-  if (hudEl) hudEl.textContent = '★ utilisé';
+  applySuperPower(pl);
+  sfxPower();
+}
 
-  const addFrames = 120;
-  if (pl.powerTimer <= 0){
-    const before = pl.powerTimer|0;
-    pl.species.use(pl);
-    if ((pl.powerTimer|0) > before){
-      if (hudEl) hudEl.textContent = pl.species.power || 'Pouvoir';
-      sfxPower();
+function findNearbyPowerBonus(pl, maxDist=1.15){
+  const px = pl.x, py = pl.y;
+  let best = null;
+  let bestD = Infinity;
+  for (let i = 0; i < Game.bonuses.length; i++){
+    const b = Game.bonuses[i];
+    if (b.kind !== 'power') continue;
+    const cx = b.x + 0.5, cy = b.y + 0.5;
+    const d = Math.hypot(px - cx, py - cy);
+    if (d <= maxDist && d < bestD){
+      best = { idx:i, bonus:b, dist:d };
+      bestD = d;
     }
   }
-  pl.powerTimer += addFrames;
+  return best;
+}
+
+function tryCollectNearbyPowerBonus(pl){
+  const found = findNearbyPowerBonus(pl);
+  if (!found) return false;
+  pl.superPowerHeld = true;
+  const b = found.bonus;
+  Game.bonuses.splice(found.idx, 1);
+  if (Game.grid[b.y] && Game.grid[b.y][b.x] === 3) Game.grid[b.y][b.x] = 0;
+  refreshPelletCell(b.x, b.y);
+  const hudEl = (pl.pid===1?UI.power1:UI.power2);
+  if (hudEl) hudEl.textContent = `★ prêt : ${pl.species.superPower}`;
   sfxPower();
+  return true;
+}
+
+function applySuperPower(pl){
+  const hudEl = (pl.pid===1?UI.power1:UI.power2);
+
+  switch(pl.species.id){
+    case 'cornucopioides': {
+      pl.powerTimer = Math.max(pl.powerTimer|0, 18*60);
+      pl.invisible = true;
+      pl.speedBoost = 1.2;
+      pl.trumpetTrapImmune = true;
+      Game.parasites.forEach(p => { p.scared = Math.max(p.scared||0, 8*60); p.path = []; p.lastSeen = null; });
+      if (hudEl) hudEl.textContent = 'Légende : Nuit totale';
+      break;
+    }
+    case 'muscaria': {
+      const tx = Math.floor(pl.x), ty = Math.floor(pl.y);
+      for(let oy=-1; oy<=1; oy++) for(let ox=-1; ox<=1; ox++){
+        const x = tx + ox, y = ty + oy;
+        if (isWalkable(x,y)) Game.traps.push({x,y,t:0});
+      }
+      Game.parasites.forEach(p => {
+        p.frozen = Math.max(p.frozen||0, 120);
+        if (Math.hypot(p.x-pl.x, p.y-pl.y) <= 5) teleportParasiteFarFromPlayer(p, pl);
+      });
+      if (hudEl) hudEl.textContent = 'Légende : Cercle de pièges';
+      break;
+    }
+    case 'cibarius': {
+      const free = Game.parasites.filter(p=>!p.servant).sort((a,b)=>distance(a.x,a.y,pl.x,pl.y)-distance(b.x,b.y,pl.x,pl.y));
+      free.slice(0,3).forEach(p => convertToServant(p, pl.pid));
+      pl.hunterWindow = 0;
+      pl.powerTimer = Math.max(pl.powerTimer|0, 20*60);
+      if (hudEl) hudEl.textContent = 'Légende : Légion servante';
+      break;
+    }
+    case 'edulis': {
+      pl.shield = true;
+      pl.hitGrace = Math.max(pl.hitGrace||0, 10*60);
+      pl.powerTimer = Math.max(pl.powerTimer|0, 10*60);
+      repelEnemiesAround(pl, 8, 2.2);
+      if (hudEl) hudEl.textContent = 'Légende : Forteresse vivante';
+      break;
+    }
+    case 'morchella': {
+      Game.parasites.forEach(p => {
+        p.morilleChaos = Math.max(p.morilleChaos||0, 12*60);
+        p.morilleOwner = pl.pid;
+        p.morilleNextSwitch = 0;
+      });
+      spawnSporeCloud(pl.x, pl.y, Math.max(COLS, ROWS));
+      if (Game.mode==='duo'){
+        const foe = (pl.pid===1)?Game.p2:Game.p1;
+        if (foe) foe.madnessTimer = Math.max(foe.madnessTimer||0, 8*60);
+      }
+      if (hudEl) hudEl.textContent = 'Légende : Apocalypse des spores';
+      break;
+    }
+    case 'phalloides': {
+      pl.phase = true;
+      pl.phaseInsideWall = false;
+      pl.phaseCooldown = 0;
+      pl.powerTimer = Math.max(pl.powerTimer|0, 14*60);
+      pl.speedBoost = 1.35;
+      if (hudEl) hudEl.textContent = 'Légende : Transcendance';
+      break;
+    }
+    default:
+      if (hudEl) hudEl.textContent = '★ utilisé';
+  }
 }
 
 /* ============ Utils ============ */
@@ -406,6 +508,11 @@ function updateLeaderHUD(){
 
 function refreshPowerHUD(pl){
   const el = (pl.pid===1?UI.power1:UI.power2);
+  if (!el) return;
+  if (pl.superPowerHeld){
+    el.textContent = `★ prêt : ${pl.species.superPower}`;
+    return;
+  }
   if (pl.species.id==='anthurus'){
     if (pl.panelActive || pl.powerTimer>0) el.textContent = 'Panel (10s)';
     else el.textContent = (pl.anthurusCharge|0) + '/10';
@@ -485,6 +592,7 @@ const Species = [
   name: 'Trompette de la mort',
   power: `Voile d'ombre`,
   desc: 'Devient invisible (la durée augmente en collectant les spores) mais se déplace plus lentement.',
+  superPower: 'Nuit totale — invisibilité longue, accélération et parasites terrorisés',
   color: '#3d3630',
   draw: (c,x,y,s,icon,ghost) => drawTrumpet(c,x,y,s,icon,ghost),
   use: (me) => {
@@ -505,6 +613,7 @@ const Species = [
   name: 'Amanite tue-mouches',
   power: 'Piège mycotique',
   desc: 'Pose des pièges qui téléportent les parasites ailleurs sur la carte.',
+  superPower: 'Cercle de pièges — pièges en zone et parasites figés/téléportés',
   color: '#c81d1d',
   draw: drawAmanita,
   use: (me) => {
@@ -519,6 +628,7 @@ const Species = [
   name: 'Girolle',
   power: 'Serviteur parasite',
   desc: 'Peut capturer un parasite et le transforme temporairement en allié collecteur.',
+  superPower: 'Légion servante — convertit jusqu’à 3 parasites en alliés',
   color: '#e6a100',
   draw: drawChanterelle,
   use: (me) => {
@@ -535,6 +645,7 @@ const Species = [
   name: 'Cèpe',
   power: 'Robustesse',
   desc: 'Encaisse un coup sans perdre de vie et repousse l’ennemi en cascade.',
+  superPower: 'Forteresse vivante — bouclier légendaire et onde de choc massive',
   color: '#7a4f2a',
   draw: drawCep,
   use: (me) => { me.powerTimer=360; me.shield=true; }
@@ -544,6 +655,7 @@ const Species = [
   name: 'Morille',
   power: 'Spores du chaos',
   desc: 'Libère des spores qui désorientent les parasites et troublent l’adversaire.',
+  superPower: 'Apocalypse des spores — chaos global et confusion prolongée',
   color: '#6a4f2f',
   draw: drawMorel,
   use: (me) => {
@@ -577,6 +689,7 @@ const Species = [
   name: 'Amanite phalloïde',
   power: 'Phase mycélienne',
   desc: 'Peut traverser une rangée d\'arbres (mur intérieur du labyrinthe).',
+  superPower: 'Transcendance — traverse les murs plus longtemps et plus vite',
   color: '#7a8b4b',
   draw: drawPhalloides,
   use: (me) => {
@@ -591,6 +704,7 @@ const Species = [
   name: 'Strophaire Vert-de-gris',
   power: 'Assistance symbiotique',
   desc: 'Coopère avec l\'autre champignon et l\'assiste pour éviter les parasites.',
+  superPower: 'Sanctuaire mycélien — option ultime dans le panel coop',
   color: '#6bb08f',
   draw: drawStropharia,
   use: ()=>{} // géré par triggerPower()
@@ -600,6 +714,7 @@ const Species = [
   name: 'Anthurus d\'archer',
   power: 'Extinction de la concurrence',
   desc: 'Allié des parasites, il met en place des pièges et des sabotages pour nuire au champignon adverse.',
+  superPower: 'Domination parasitaire — option ultime dans le panel sabotage',
   color: '#b04a6b',
   draw: drawAnthurus,
   use: ()=>{} // géré par triggerPower()
@@ -628,7 +743,10 @@ function buildChoiceCard(sp, forPid){
 
   const right=document.createElement('div'); right.style.display='grid'; right.style.gap='4px';
   const name=document.createElement('div'); name.style.fontWeight='800'; name.textContent=sp.name;
-  const desc=document.createElement('div'); desc.style.opacity='.85'; desc.style.fontSize='13px'; desc.textContent='Pouvoir : '+sp.power+' — '+sp.desc;
+  const desc=document.createElement('div');
+  desc.style.opacity='.85';
+  desc.style.fontSize='13px';
+  desc.innerHTML='Pouvoir : '+sp.power+' — '+sp.desc+'<br><span style="color:#ffe7a4">Superpouvoir : '+sp.superPower+'</span>';
 
   const row=document.createElement('div'); row.className='row';
   const badge=document.createElement('span'); badge.className='badge'; badge.textContent=sp.id;
@@ -803,6 +921,30 @@ if (pl.species.id === 'stropharia'){
     label: 'Désactiver pièges à proximité',
     action: ()=>{ disableNearbyTraps(tx,ty,3); sfxPower(); }
   });
+  if (pl.superPowerHeld){
+    entries.unshift({
+      label: '★ SUPREME — Sanctuaire mycélien (zone sûre)',
+      super: true,
+      action: ()=>{
+        pl.superPowerHeld = false;
+        pl.powerTimer = Math.max(pl.powerTimer|0, 12*60);
+        Game.parasites.forEach(p => {
+          if (Math.hypot(p.x-pl.x, p.y-pl.y) <= 8){
+            p.frozen = Math.max(p.frozen||0, 6*60);
+            p.scared = Math.max(p.scared||0, 6*60);
+          }
+        });
+        const mate = (pl.pid===1?Game.p2:Game.p1);
+        if (mate){
+          mate.hitGrace = Math.max(mate.hitGrace||0, 5*60);
+          mate.glowTimer = Math.max(mate.glowTimer||0, 5*60);
+        }
+        const hud = (pl.pid===1?UI.power1:UI.power2);
+        if (hud) hud.textContent = 'Légende : Sanctuaire mycélien';
+        sfxPower();
+      }
+    });
+  }
 }
 
  if (pl.species.id === 'anthurus'){
@@ -849,6 +991,33 @@ if (pl.species.id === 'stropharia'){
       }
     }
   });
+  if (pl.superPowerHeld){
+    entries.unshift({
+      label: '★ SUPREME — Domination parasitaire (ultime)',
+      super: true,
+      action: ()=>{
+        pl.superPowerHeld = false;
+        const foe = (pl.pid===1?Game.p2:Game.p1);
+        for(let i=0;i<3;i++) spawnEnemy();
+        if (foe){
+          foe.frozenTimer = Math.max(foe.frozenTimer||0, 4*60);
+          foe.madnessTimer = Math.max(foe.madnessTimer||0, 6*60);
+        }
+        const cx = Math.floor(pl.x), cy = Math.floor(pl.y);
+        for(let oy=-1; oy<=1; oy++) for(let ox=-1; ox<=1; ox++){
+          const x=cx+ox, y=cy+oy;
+          if (isInterior(x,y) && Game.grid[y][x]!==1){
+            Game.grid[y][x]=4;
+            Game.traps.push({x,y,t:1});
+            refreshPelletCell(x,y);
+          }
+        }
+        const hud = (pl.pid===1?UI.power1:UI.power2);
+        if (hud) hud.textContent = 'Légende : Domination parasitaire';
+        sfxPower();
+      }
+    });
+  }
 }
 
   return entries;
@@ -894,7 +1063,7 @@ function openPowerPanel(pl){
   const title = document.createElement('div');
   title.className='title';
   title.style.fontSize='18px';
-  title.textContent = (pl.species.id==='stropharia') ? 'Aide coop (10s)' : 'Sabotage (10s)';
+  title.textContent = (pl.panelMode==='super') ? 'Superpouvoir (10s)' : ((pl.species.id==='stropharia') ? 'Aide coop (10s)' : 'Sabotage (10s)');
   panel.appendChild(title);
 
   const list = document.createElement('div');
@@ -908,6 +1077,11 @@ function openPowerPanel(pl){
       const item = document.createElement('div');
       item.className='choice';
       item.style.cssText='padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:8px;cursor:pointer;background:#0e0b13;';
+      if (e.super){
+        item.style.borderColor = '#ffd76a';
+        item.style.background = 'linear-gradient(90deg,#24180a,#0e0b13)';
+        item.style.fontWeight = '800';
+      }
       if(i===pl.panelSel){ item.style.outline='2px solid #8fd0ff'; item.style.boxShadow='0 0 0 3px #8fd0ff33'; }
       item.textContent = e.label;
       item.onclick = (evt) => {
@@ -1332,13 +1506,13 @@ Game.grid = genLevel(seed);
       if(v===2) Game.remaining++;
       if (v===3) {
   const k = (i + y + x) % BonusKinds.length;
-  Game.bonuses.push({ x, y, kind: pickBonusKind(k) });
+  Game.bonuses.push({ x, y, kind: pickBonusKind(k, x, y, i) });
 }
       if(v===4) Game.traps.push({x,y,t:(i+x+y)%2});
     }
   }
 
-  const count= (6+Math.floor(i*0.8));
+  const count= Math.max(4, Math.round((6+Math.floor(i*0.8)) * (0.8 + SelectedDifficulty.factor*0.35))); // adoucit les débuts
   for(let k=0;k<count;k++){
     const pos=findOpenTile();
 const base = enemyBaseSpeedAt(i);
@@ -1598,7 +1772,14 @@ const speed = base * SelectedDifficulty.factor; const kind=(Math.random()*4)|0;
 }
 
 const BonusKinds=['life','speed','power','score','freeze'];
-function pickBonusKind(seed){ return BonusKinds[seed%BonusKinds.length]; }
+function pickBonusKind(seed, x=0, y=0, level=0){
+  const roll = ((seed*1103515245 + x*12345 + y*2654435761 + level*7919) >>> 0) % 100;
+  if (roll < 4) return 'power';
+  if (roll < 19) return 'life';
+  if (roll < 46) return 'speed';
+  if (roll < 73) return 'freeze';
+  return 'score';
+}
 function spawnSporeCloud(x,y,radTiles=null){
   Game.particles.push({x:x*TILE,y:y*TILE,r:0,life:240,type:'cloud'});
   if (radTiles!=null) {
@@ -1997,13 +2178,8 @@ function eatBonusFor(player,b){
     }
 
     case 'power': {
-      if (player.superPowerHeld) {
-      } else {
-        clearCell();
-        player.superPowerHeld = true;
-        (player.pid===1?UI.power1:UI.power2).textContent = '★ en poche';
-        sfxPower();
-      }
+      // Désormais: activation au clavier à proximité (pas de ramassage automatique).
+      consumed = false;
       break;
     }
 
@@ -2617,6 +2793,7 @@ function playerHit(pl, hitter){
   if (newLives >= 0) {
     const s=findOpenTile(); pl.x=s.x+0.5; pl.y=s.y+0.5; pl.dir=[0,0];
     pl.respawnFlash = 5*60;
+    pl.hitGrace = Math.max(pl.hitGrace||0, 2*60);
     pl.invisible=false; pl.phase=false; pl.frozenTimer=0;
     pl.glowTimer = Math.max(pl.glowTimer||0, 120);
   }
@@ -2665,9 +2842,9 @@ function updatePlayer(pl, dt){
       if (pl.species.id === 'cornucopioides') pl.trumpetCd = 600;
 
       const el = (pl.pid === 1 ? UI.power1 : UI.power2);
-      if (el) el.textContent = '—';
+      if (el) el.textContent = pl.superPowerHeld ? `★ prêt : ${pl.species.superPower}` : '—';
 
-      if (pl.species.id === 'anthurus' && typeof refreshPowerHUD === 'function') refreshPowerHUD(pl);
+      if (pl.species.id === 'anthurus' && typeof refreshPowerHUD === 'function' && !pl.superPowerHeld) refreshPowerHUD(pl);
     }
   }
 
@@ -3084,6 +3261,21 @@ function drawPlayerEntity(pl){
     CTX.fillStyle = '#fff';
     CTX.fillText('★', 0, 0);
     CTX.restore();
+  } else {
+    const nearPower = findNearbyPowerBonus(pl);
+    if (nearPower){
+      const hintKey = (pl.pid===1) ? 'Maj. Droite' : 'Espace';
+      CTX.save();
+      CTX.font = 'bold 12px system-ui';
+      CTX.textAlign = 'center';
+      CTX.textBaseline = 'middle';
+      CTX.lineWidth = 4;
+      CTX.strokeStyle = 'rgba(0,0,0,0.65)';
+      CTX.strokeText('Super: '+hintKey, x, y-34);
+      CTX.fillStyle = '#ffe8a6';
+      CTX.fillText('Super: '+hintKey, x, y-34);
+      CTX.restore();
+    }
   }
 
   const drawMushroomCentered = (cx, cy) => {
