@@ -1,5 +1,5 @@
 // sw.js - Service Worker pour PACMUSH ODYSSEY
-const CACHE_NAME = 'pacmush-odyssey-v2.4';
+const CACHE_NAME = 'pacmush-odyssey-v2.5';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
